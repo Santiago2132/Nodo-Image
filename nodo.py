@@ -10,7 +10,7 @@ import socket
 import requests
 import json
 
-BALANCEADOR = "http://127.0.1.1:5000/api/nodos/registrar"  # Cambiar por la URL real
+BALANCEADOR = "http://192.168.154.129:5000/api/nodos/registrar"  # Cambiar por la URL real
 
 class GestorNodos:
     def __init__(self):
