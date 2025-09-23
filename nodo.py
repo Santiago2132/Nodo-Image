@@ -2,11 +2,15 @@ import os
 import threading
 import time
 from flask import Flask, request, jsonify, Response
+from flask_cors import CORS
 from werkzeug.serving import make_server
 import xml.etree.ElementTree as ET
 from objects import NodoOptimizado, LectorXML
 import socket
+import requests
+import json
 
+BALANCEADOR = "http://192.168.1.7:5000/api/nodos/registrar"  # Cambiar por la URL real
 
 class GestorNodos:
     def __init__(self):
@@ -248,6 +252,43 @@ class GestorNodos:
         return ET.tostring(root, encoding='unicode')
 
 
+def registrar_nodo_en_balanceador(ip_nodo):
+    """
+    Registra el nodo en el balanceador de cargas
+    """
+    try:
+        datos_registro = {
+            "encendido": "true",
+            "ip": ip_nodo,
+            "puertos": [8001, 8002, 8003, 8004],
+            "servicios": {
+                "8001": "procesamiento_batch",
+                "8002": "transformaciones_batch", 
+                "8003": "estado_salud",
+                "8004": "conversion_unica"
+            },
+            "capacidad_maxima": 100000
+        }
+        
+        response = requests.post(
+            BALANCEADOR,
+            json=datos_registro,
+            headers={"Content-Type": "application/json"},
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            print(f"✅ Nodo registrado exitosamente en balanceador: {ip_nodo}")
+        else:
+            print(f"⚠️  Error al registrar nodo. Status: {response.status_code}")
+            print(f"   Respuesta: {response.text}")
+            
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Error conectando con balanceador: {e}")
+    except Exception as e:
+        print(f"❌ Error inesperado registrando nodo: {e}")
+
+
 # Instancia global del gestor
 gestor = GestorNodos()
 
@@ -257,6 +298,11 @@ app_8002 = Flask(__name__)
 app_8003 = Flask(__name__)
 app_8004 = Flask(__name__)
 
+# Habilitar CORS para todas las aplicaciones
+CORS(app_8001, origins="*", allow_headers=["Content-Type", "Authorization"], methods=["GET", "POST", "OPTIONS"])
+CORS(app_8002, origins="*", allow_headers=["Content-Type", "Authorization"], methods=["GET", "POST", "OPTIONS"])
+CORS(app_8003, origins="*", allow_headers=["Content-Type", "Authorization"], methods=["GET", "POST", "OPTIONS"])
+CORS(app_8004, origins="*", allow_headers=["Content-Type", "Authorization"], methods=["GET", "POST", "OPTIONS"])
 
 # Puerto 8001: Procesamiento básico de imágenes
 @app_8001.route('/procesar', methods=['POST'])
@@ -424,6 +470,13 @@ def main():
     print("🚀 Iniciando Gestor de Nodos de Imagen...")
     print("=" * 50)
     
+    # Obtener IP local
+    ip_local = socket.gethostbyname(socket.gethostname())
+    
+    # Registrar nodo en balanceador
+    print("📡 Registrando nodo en balanceador...")
+    registrar_nodo_en_balanceador(ip_local)
+    
     # Crear hilos para cada servidor
     servidor_8001 = threading.Thread(
         target=ejecutar_servidor, 
@@ -462,6 +515,8 @@ def main():
     print("  • Puerto 8003: GET /salud - Health check")
     print("  • Puerto 8004: POST /convertir - Conversión imagen única")
     print(f"\n⚡ Capacidad: {gestor.capacidad_maxima:,} imágenes simultáneas")
+    print(f"⚡ IP del nodo: {ip_local}")
+    print("⚡ CORS habilitado en todos los puertos")
     print("⚡ Servidores ejecutándose... (Ctrl+C para detener)")
     
     try:
