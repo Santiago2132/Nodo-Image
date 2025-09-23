@@ -7,10 +7,60 @@ from werkzeug.serving import make_server
 import xml.etree.ElementTree as ET
 from objects import NodoOptimizado, LectorXML
 import socket
+import subprocess
+import re
 import requests
 import json
+import sys
 
-BALANCEADOR = "http://192.168.154.129:5000/api/nodos/registrar"  # Cambiar por la URL real
+def obtener_ip_real():
+    """
+    Obtiene la IP real de la máquina en la red local.
+    """
+    # Método 1: Conectar a un servidor externo (más confiable)
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            if not ip.startswith("127."):
+                return ip
+    except:
+        pass
+    
+    # Método 2: Usar ip route (Linux/Mac)
+    try:
+        result = subprocess.run(['ip', 'route', 'get', '8.8.8.8'], 
+                              capture_output=True, text=True, timeout=3)
+        match = re.search(r'src (\d+\.\d+\.\d+\.\d+)', result.stdout)
+        if match:
+            return match.group(1)
+    except:
+        pass
+    
+    # Método 3: Usar hostname -I (Linux)
+    try:
+        result = subprocess.run(['hostname', '-I'], 
+                              capture_output=True, text=True, timeout=3)
+        ips = result.stdout.strip().split()
+        for ip in ips:
+            if not ip.startswith("127.") and "." in ip:
+                return ip
+    except:
+        pass
+    
+    # Fallback
+    try:
+        ip = socket.gethostbyname(socket.gethostname())
+        if not ip.startswith("127."):
+            return ip
+    except:
+        pass
+    
+    return "127.0.0.1"
+
+# URL del balanceador - CONFIGURABLE
+BALANCEADOR_IP = "192.168.154.129"  # Cambiar por la IP real del balanceador
+BALANCEADOR_URL = f"http://{BALANCEADOR_IP}:5000/api/nodos/registrar"
 
 class GestorNodos:
     def __init__(self):
@@ -270,8 +320,10 @@ def registrar_nodo_en_balanceador(ip_nodo):
             "capacidad_maxima": 100000
         }
         
+        print(f"📡 Intentando registrar nodo {ip_nodo} en balanceador {BALANCEADOR_URL}")
+        
         response = requests.post(
-            BALANCEADOR,
+            BALANCEADOR_URL,
             json=datos_registro,
             headers={"Content-Type": "application/json"},
             timeout=10
@@ -285,6 +337,7 @@ def registrar_nodo_en_balanceador(ip_nodo):
             
     except requests.exceptions.RequestException as e:
         print(f"❌ Error conectando con balanceador: {e}")
+        print(f"   Verificar que el balanceador esté ejecutándose en {BALANCEADOR_IP}:5000")
     except Exception as e:
         print(f"❌ Error inesperado registrando nodo: {e}")
 
@@ -458,20 +511,23 @@ def check_health():
     })
 
 
-def ejecutar_servidor(app, puerto):
-    """Ejecuta un servidor Flask en la IP local del PC y un puerto específico."""
-    ip_local = socket.gethostbyname(socket.gethostname())
-    server = make_server(ip_local, puerto, app)
-    print(f"✅ Servidor iniciado en {ip_local}:{puerto}")
-    server.serve_forever()
+def ejecutar_servidor(app, puerto, ip_local):
+    """Ejecuta un servidor Flask en la IP real y un puerto específico."""
+    try:
+        server = make_server(ip_local, puerto, app)
+        print(f"✅ Servidor iniciado en {ip_local}:{puerto}")
+        server.serve_forever()
+    except Exception as e:
+        print(f"❌ Error iniciando servidor en puerto {puerto}: {e}")
 
 def main():
     """Función principal que inicia todos los servidores."""
     print("🚀 Iniciando Gestor de Nodos de Imagen...")
     print("=" * 50)
     
-    # Obtener IP local
-    ip_local = socket.gethostbyname(socket.gethostname())
+    # Obtener IP real
+    ip_local = obtener_ip_real()
+    print(f"🔍 IP detectada: {ip_local}")
     
     # Registrar nodo en balanceador
     print("📡 Registrando nodo en balanceador...")
@@ -480,25 +536,25 @@ def main():
     # Crear hilos para cada servidor
     servidor_8001 = threading.Thread(
         target=ejecutar_servidor, 
-        args=(app_8001, 8001),
+        args=(app_8001, 8001, ip_local),
         daemon=True
     )
     
     servidor_8002 = threading.Thread(
         target=ejecutar_servidor, 
-        args=(app_8002, 8002),
+        args=(app_8002, 8002, ip_local),
         daemon=True
     )
     
     servidor_8003 = threading.Thread(
         target=ejecutar_servidor, 
-        args=(app_8003, 8003),
+        args=(app_8003, 8003, ip_local),
         daemon=True
     )
     
     servidor_8004 = threading.Thread(
         target=ejecutar_servidor,
-        args=(app_8004, 8004), 
+        args=(app_8004, 8004, ip_local), 
         daemon=True
     )
     
@@ -516,6 +572,7 @@ def main():
     print("  • Puerto 8004: POST /convertir - Conversión imagen única")
     print(f"\n⚡ Capacidad: {gestor.capacidad_maxima:,} imágenes simultáneas")
     print(f"⚡ IP del nodo: {ip_local}")
+    print(f"⚡ Balanceador configurado: {BALANCEADOR_IP}")
     print("⚡ CORS habilitado en todos los puertos")
     print("⚡ Servidores ejecutándose... (Ctrl+C para detener)")
     
