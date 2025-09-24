@@ -9,15 +9,17 @@ from objects import NodoOptimizado, LectorXML
 import socket
 import subprocess
 import re
-import requests
 import json
 import sys
+import xmlrpc.server
+import xmlrpc.client
+from socketserver import ThreadingMixIn
 
 def obtener_ip_real():
     """
-    Obtiene la IP real de la máquina en la red local.
+    Obtiene la IP real de la mÃ¡quina en la red local.
     """
-    # Método 1: Conectar a un servidor externo (más confiable)
+    # MÃ©todo 1: Conectar a un servidor externo (mÃ¡s confiable)
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.connect(("8.8.8.8", 80))
@@ -27,7 +29,7 @@ def obtener_ip_real():
     except:
         pass
     
-    # Método 2: Usar ip route (Linux/Mac)
+    # MÃ©todo 2: Usar ip route (Linux/Mac)
     try:
         result = subprocess.run(['ip', 'route', 'get', '8.8.8.8'], 
                               capture_output=True, text=True, timeout=3)
@@ -37,7 +39,7 @@ def obtener_ip_real():
     except:
         pass
     
-    # Método 3: Usar hostname -I (Linux)
+    # MÃ©todo 3: Usar hostname -I (Linux)
     try:
         result = subprocess.run(['hostname', '-I'], 
                               capture_output=True, text=True, timeout=3)
@@ -60,7 +62,10 @@ def obtener_ip_real():
 
 # URL del balanceador - CONFIGURABLE
 BALANCEADOR_IP = "192.168.154.129"  # Cambiar por la IP real del balanceador
-BALANCEADOR_URL = f"http://{BALANCEADOR_IP}:5000/api/nodos/registrar"
+BALANCEADOR_RPC_URL = f"http://{BALANCEADOR_IP}:8000"
+
+class ThreadedXMLRPCServer(ThreadingMixIn, xmlrpc.server.SimpleXMLRPCServer):
+    pass
 
 class GestorNodos:
     def __init__(self):
@@ -72,8 +77,8 @@ class GestorNodos:
     
     def procesar_xml_imagenes(self, xml_content, aplicar_transformaciones=True):
         """
-        Procesa un XML con múltiples imágenes y aplica transformaciones.
-        Retorna XML fusionado con todas las imágenes procesadas.
+        Procesa un XML con mÃºltiples imÃ¡genes y aplica transformaciones.
+        Retorna XML fusionado con todas las imÃ¡genes procesadas.
         """
         num_imagenes = 0
         try:
@@ -82,13 +87,13 @@ class GestorNodos:
             num_imagenes = len(imagenes)
             
             if not imagenes:
-                return self._crear_xml_error("No se encontraron imágenes en el XML")
+                return self._crear_xml_error("No se encontraron imÃ¡genes en el XML")
         except:
             return self._crear_xml_error("XML malformado")
         
         with self.lock:
             if self.imagenes_procesando + num_imagenes > self.capacidad_maxima:
-                return self._crear_xml_error("Capacidad máxima excedida")
+                return self._crear_xml_error("Capacidad mÃ¡xima excedida")
             self.imagenes_procesando += num_imagenes
             self.estado = "procesando"
         
@@ -138,7 +143,7 @@ class GestorNodos:
                                 angle = 45
                                 if '_' in trans:
                                     try:
-                                        angle = int(trans.split('_')[-1].replace('°', ''))
+                                        angle = int(trans.split('_')[-1].replace('Â°', ''))
                                     except:
                                         pass
                                 nodo.rotar(angle)
@@ -210,7 +215,7 @@ class GestorNodos:
     
     def procesar_xml_transformaciones(self, xml_content, transformaciones_extra=None):
         """
-        Procesa XML aplicando transformaciones específicas.
+        Procesa XML aplicando transformaciones especÃ­ficas.
         """
         return self.procesar_xml_imagenes(xml_content, aplicar_transformaciones=True)
     
@@ -233,7 +238,7 @@ class GestorNodos:
             
             with self.lock:
                 if self.imagenes_procesando >= self.capacidad_maxima:
-                    return self._crear_xml_error("Capacidad máxima excedida")
+                    return self._crear_xml_error("Capacidad mÃ¡xima excedida")
                 self.imagenes_procesando += 1
                 self.estado = "procesando"
             
@@ -302,287 +307,258 @@ class GestorNodos:
         return ET.tostring(root, encoding='unicode')
 
 
-def registrar_nodo_en_balanceador(ip_nodo):
+class RPCNodoService:
+    """Servicio RPC para el nodo"""
+    def __init__(self, gestor):
+        self.gestor = gestor
+    
+    def ping(self):
+        """RPC method para verificar conectividad"""
+        return "pong"
+    
+    def procesar_imagenes(self, xml_content):
+        """RPC method para procesamiento batch de imÃ¡genes"""
+        try:
+            estado = self.gestor.obtener_estado()
+            if not estado["disponible"]:
+                return json.dumps({
+                    "success": False,
+                    "error": "Servidor saturado, intente mÃ¡s tarde"
+                })
+            
+            resultado = self.gestor.procesar_xml_imagenes(xml_content)
+            
+            # Verificar si es error
+            if resultado.startswith("<error>"):
+                return json.dumps({
+                    "success": False,
+                    "error": resultado
+                })
+            
+            return json.dumps({
+                "success": True,
+                "xml_result": resultado
+            })
+        except Exception as e:
+            return json.dumps({
+                "success": False,
+                "error": f"Error del servidor: {str(e)}"
+            })
+    
+    def transformar_imagenes(self, xml_content):
+        """RPC method para transformaciones batch de imÃ¡genes"""
+        try:
+            estado = self.gestor.obtener_estado()
+            if not estado["disponible"]:
+                return json.dumps({
+                    "success": False,
+                    "error": "Servidor saturado, intente mÃ¡s tarde"
+                })
+            
+            resultado = self.gestor.procesar_xml_transformaciones(xml_content)
+            
+            # Verificar si es error
+            if resultado.startswith("<error>"):
+                return json.dumps({
+                    "success": False,
+                    "error": resultado
+                })
+            
+            return json.dumps({
+                "success": True,
+                "xml_result": resultado
+            })
+        except Exception as e:
+            return json.dumps({
+                "success": False,
+                "error": f"Error del servidor: {str(e)}"
+            })
+    
+    def convertir_imagen_unica(self, xml_content, formato_salida="JPEG", calidad=85):
+        """RPC method para conversiÃ³n de imagen Ãºnica"""
+        try:
+            # Validar formato
+            if formato_salida.upper() not in ['JPEG', 'PNG', 'WEBP']:
+                return json.dumps({
+                    "success": False,
+                    "error": "Formato no soportado. Use: JPEG, PNG, WEBP"
+                })
+            
+            resultado = self.gestor.convertir_imagen_unica(xml_content, formato_salida, calidad)
+            
+            # Verificar si es error
+            if resultado.startswith("<error>"):
+                return json.dumps({
+                    "success": False,
+                    "error": resultado
+                })
+            
+            return json.dumps({
+                "success": True,
+                "xml_result": resultado
+            })
+        except Exception as e:
+            return json.dumps({
+                "success": False,
+                "error": f"Error del servidor: {str(e)}"
+            })
+    
+    def obtener_estado(self):
+        """RPC method para obtener estado del nodo"""
+        try:
+            estado = self.gestor.obtener_estado()
+            return json.dumps(estado)
+        except Exception as e:
+            return json.dumps({
+                "error": f"Error al obtener estado: {str(e)}"
+            })
+
+
+def registrar_nodo_en_balanceador_rpc(ip_nodo):
     """
-    Registra el nodo en el balanceador de cargas
+    Registra el nodo en el balanceador de cargas via RPC
     """
     try:
         datos_registro = {
             "encendido": "true",
             "ip": ip_nodo,
-            "puertos": [8001, 8002, 8003, 8004],
+            "puertos": [9000],  # Puerto RPC
             "servicios": {
-                "8001": "procesamiento_batch",
-                "8002": "transformaciones_batch", 
-                "8003": "estado_salud",
-                "8004": "conversion_unica"
+                "9000": "nodo_rpc_service"
             },
             "capacidad_maxima": 100000
         }
         
-        print(f"📡 Intentando registrar nodo {ip_nodo} en balanceador {BALANCEADOR_URL}")
+        print(f"ðŸ¡ Intentando registrar nodo {ip_nodo} en balanceador RPC {BALANCEADOR_RPC_URL}")
         
-        response = requests.post(
-            BALANCEADOR_URL,
-            json=datos_registro,
-            headers={"Content-Type": "application/json"},
-            timeout=10
-        )
+        # Conectar con balanceador RPC
+        balanceador_client = xmlrpc.client.ServerProxy(BALANCEADOR_RPC_URL)
         
-        if response.status_code == 200:
-            print(f"✅ Nodo registrado exitosamente en balanceador: {ip_nodo}")
+        # Registrar nodo
+        resultado = balanceador_client.registrar_nodo(json.dumps(datos_registro))
+        
+        if resultado:
+            print(f"âœ… Nodo registrado exitosamente en balanceador: {ip_nodo}")
         else:
-            print(f"⚠️  Error al registrar nodo. Status: {response.status_code}")
-            print(f"   Respuesta: {response.text}")
+            print(f"âš ï¸  Error al registrar nodo en balanceador")
             
-    except requests.exceptions.RequestException as e:
-        print(f"❌ Error conectando con balanceador: {e}")
-        print(f"   Verificar que el balanceador esté ejecutándose en {BALANCEADOR_IP}:5000")
     except Exception as e:
-        print(f"❌ Error inesperado registrando nodo: {e}")
+        print(f"âŒ Error conectando con balanceador RPC: {e}")
+        print(f"   Verificar que el balanceador estÃ© ejecutÃ¡ndose en {BALANCEADOR_IP}:8000")
+
+
+def iniciar_servidor_rpc_nodo(ip, puerto=9000):
+    """Inicia el servidor RPC del nodo"""
+    try:
+        server = ThreadedXMLRPCServer((ip, puerto), allow_none=True)
+        server.register_introspection_functions()
+        
+        # Registrar servicio RPC del nodo
+        rpc_service = RPCNodoService(gestor)
+        server.register_instance(rpc_service)
+        
+        print(f"âœ… Servidor RPC del nodo iniciado en {ip}:{puerto}")
+        server.serve_forever()
+    except Exception as e:
+        print(f"âŒ Error iniciando servidor RPC del nodo: {e}")
 
 
 # Instancia global del gestor
 gestor = GestorNodos()
 
-# Crear aplicaciones Flask para cada puerto
-app_8001 = Flask(__name__)
-app_8002 = Flask(__name__)
-app_8003 = Flask(__name__)
-app_8004 = Flask(__name__)
+# Crear aplicación Flask para el endpoint REST de estado (opcional)
+app = Flask(__name__)
+CORS(app, origins="*", allow_headers=["Content-Type", "Authorization"], methods=["GET", "POST", "OPTIONS"])
 
-# Habilitar CORS para todas las aplicaciones
-CORS(app_8001, origins="*", allow_headers=["Content-Type", "Authorization"], methods=["GET", "POST", "OPTIONS"])
-CORS(app_8002, origins="*", allow_headers=["Content-Type", "Authorization"], methods=["GET", "POST", "OPTIONS"])
-CORS(app_8003, origins="*", allow_headers=["Content-Type", "Authorization"], methods=["GET", "POST", "OPTIONS"])
-CORS(app_8004, origins="*", allow_headers=["Content-Type", "Authorization"], methods=["GET", "POST", "OPTIONS"])
-
-# Puerto 8001: Procesamiento básico de imágenes
-@app_8001.route('/procesar', methods=['POST'])
-def procesar_imagenes():
-    try:
-        if request.content_type == 'application/xml' or request.content_type == 'text/xml':
-            xml_content = request.data.decode('utf-8')
-        else:
-            xml_content = request.get_data(as_text=True)
-        
-        if not xml_content:
-            return Response(
-                gestor._crear_xml_error("No se recibió contenido XML"),
-                mimetype='application/xml',
-                status=400
-            )
-        
-        # Verificar capacidad
-        estado = gestor.obtener_estado()
-        if not estado["disponible"]:
-            return Response(
-                gestor._crear_xml_error("Servidor saturado, intente más tarde"),
-                mimetype='application/xml',
-                status=503
-            )
-        
-        resultado = gestor.procesar_xml_imagenes(xml_content)
-        
-        return Response(
-            resultado,
-            mimetype='application/xml',
-            status=200
-        )
-        
-    except Exception as e:
-        return Response(
-            gestor._crear_xml_error(f"Error del servidor: {str(e)}"),
-            mimetype='application/xml',
-            status=500
-        )
-
-
-# Puerto 8002: Procesamiento con transformaciones específicas
-@app_8002.route('/transformar', methods=['POST'])
-def transformar_imagenes():
-    try:
-        if request.content_type == 'application/xml' or request.content_type == 'text/xml':
-            xml_content = request.data.decode('utf-8')
-        else:
-            xml_content = request.get_data(as_text=True)
-        
-        if not xml_content:
-            return Response(
-                gestor._crear_xml_error("No se recibió contenido XML"),
-                mimetype='application/xml',
-                status=400
-            )
-        
-        # Verificar capacidad
-        estado = gestor.obtener_estado()
-        if not estado["disponible"]:
-            return Response(
-                gestor._crear_xml_error("Servidor saturado, intente más tarde"),
-                mimetype='application/xml',
-                status=503
-            )
-        
-        resultado = gestor.procesar_xml_transformaciones(xml_content)
-        
-        return Response(
-            resultado,
-            mimetype='application/xml',
-            status=200
-        )
-        
-    except Exception as e:
-        return Response(
-            gestor._crear_xml_error(f"Error del servidor: {str(e)}"),
-            mimetype='application/xml',
-            status=500
-        )
-
-
-# Puerto 8004: Conversión de imagen única
-@app_8004.route('/convertir', methods=['POST'])
-def convertir_imagen_unica():
-    try:
-        if request.content_type == 'application/xml' or request.content_type == 'text/xml':
-            xml_content = request.data.decode('utf-8')
-        else:
-            xml_content = request.get_data(as_text=True)
-        
-        if not xml_content:
-            return Response(
-                gestor._crear_xml_error("No se recibió contenido XML"),
-                mimetype='application/xml',
-                status=400
-            )
-        
-        # Obtener parámetros de formato y calidad
-        formato = request.args.get('formato', 'JPEG').upper()
-        calidad = int(request.args.get('calidad', 85))
-        
-        # Validar formato
-        if formato not in ['JPEG', 'PNG', 'WEBP']:
-            return Response(
-                gestor._crear_xml_error("Formato no soportado. Use: JPEG, PNG, WEBP"),
-                mimetype='application/xml',
-                status=400
-            )
-        
-        resultado = gestor.convertir_imagen_unica(xml_content, formato, calidad)
-        
-        return Response(
-            resultado,
-            mimetype='application/xml',
-            status=200
-        )
-        
-    except ValueError:
-        return Response(
-            gestor._crear_xml_error("Parámetro calidad debe ser un número"),
-            mimetype='application/xml',
-            status=400
-        )
-    except Exception as e:
-        return Response(
-            gestor._crear_xml_error(f"Error del servidor: {str(e)}"),
-            mimetype='application/xml',
-            status=500
-        )
-
-
-# Puerto 8003: Consulta de estado
-@app_8003.route('/estado', methods=['GET'])
+@app.route('/estado', methods=['GET'])
 def consultar_estado():
+    """Endpoint REST opcional para consulta de estado"""
     try:
         estado = gestor.obtener_estado()
         return jsonify(estado)
-        
     except Exception as e:
         return jsonify({
             "error": f"Error al obtener estado: {str(e)}"
         }), 500
 
-
-@app_8003.route('/salud', methods=['GET'])
+@app.route('/salud', methods=['GET'])
 def check_health():
+    """Health check REST opcional"""
     return jsonify({
         "status": "healthy",
-        "service": "Gestor de Nodos de Imagen",
+        "service": "Gestor de Nodos RPC de Imagen",
         "timestamp": time.time()
     })
 
 
-def ejecutar_servidor(app, puerto, ip_local):
-    """Ejecuta un servidor Flask en la IP real y un puerto específico."""
+def ejecutar_servidor_rest(app, puerto, ip_local):
+    """Ejecuta servidor REST opcional."""
     try:
         server = make_server(ip_local, puerto, app)
-        print(f"✅ Servidor iniciado en {ip_local}:{puerto}")
+        print(f"âœ… Servidor REST opcional iniciado en {ip_local}:{puerto}")
         server.serve_forever()
     except Exception as e:
-        print(f"❌ Error iniciando servidor en puerto {puerto}: {e}")
+        print(f"âŒ Error iniciando servidor REST: {e}")
+
 
 def main():
-    """Función principal que inicia todos los servidores."""
-    print("🚀 Iniciando Gestor de Nodos de Imagen...")
+    """FunciÃ³n principal que inicia el nodo RPC."""
+    print("ðŸš€ Iniciando Nodo RPC de Imagen...")
     print("=" * 50)
     
     # Obtener IP real
     ip_local = obtener_ip_real()
-    print(f"🔍 IP detectada: {ip_local}")
+    print(f"ðŸ IP detectada: {ip_local}")
     
-    # Registrar nodo en balanceador
-    print("📡 Registrando nodo en balanceador...")
-    registrar_nodo_en_balanceador(ip_local)
-    
-    # Crear hilos para cada servidor
-    servidor_8001 = threading.Thread(
-        target=ejecutar_servidor, 
-        args=(app_8001, 8001, ip_local),
+    # Iniciar servidor RPC en hilo separado
+    puerto_rpc = 9000
+    servidor_rpc = threading.Thread(
+        target=iniciar_servidor_rpc_nodo, 
+        args=(ip_local, puerto_rpc),
         daemon=True
     )
+    servidor_rpc.start()
     
-    servidor_8002 = threading.Thread(
-        target=ejecutar_servidor, 
-        args=(app_8002, 8002, ip_local),
+    # Esperar un momento para que el servidor RPC inicie
+    time.sleep(2)
+    
+    # Registrar nodo en balanceador via RPC
+    print("ðŸ¡ Registrando nodo en balanceador...")
+    registrar_nodo_en_balanceador_rpc(ip_local)
+    
+    # Iniciar servidor REST opcional para estado
+    puerto_rest = 8003
+    servidor_rest = threading.Thread(
+        target=ejecutar_servidor_rest,
+        args=(app, puerto_rest, ip_local),
         daemon=True
     )
+    servidor_rest.start()
     
-    servidor_8003 = threading.Thread(
-        target=ejecutar_servidor, 
-        args=(app_8003, 8003, ip_local),
-        daemon=True
-    )
+    print("ðŸ¡ Servicios disponibles:")
+    print(f"  â€¢ RPC Puerto {puerto_rpc}: Comunicación con balanceador")
+    print("    - procesar_imagenes(xml_content)")
+    print("    - transformar_imagenes(xml_content)")  
+    print("    - convertir_imagen_unica(xml_content, formato, calidad)")
+    print("    - obtener_estado()")
+    print("    - ping()")
+    print(f"  â€¢ REST Puerto {puerto_rest}: GET /estado - Estado del servidor (opcional)")
+    print(f"  â€¢ REST Puerto {puerto_rest}: GET /salud - Health check (opcional)")
     
-    servidor_8004 = threading.Thread(
-        target=ejecutar_servidor,
-        args=(app_8004, 8004, ip_local), 
-        daemon=True
-    )
-    
-    # Iniciar todos los servidores
-    servidor_8001.start()
-    servidor_8002.start() 
-    servidor_8003.start()
-    servidor_8004.start()
-    
-    print("📡 Servicios disponibles:")
-    print("  • Puerto 8001: POST /procesar - Procesamiento batch N imágenes")
-    print("  • Puerto 8002: POST /transformar - Transformaciones batch N imágenes")
-    print("  • Puerto 8003: GET /estado - Estado del servidor")
-    print("  • Puerto 8003: GET /salud - Health check")
-    print("  • Puerto 8004: POST /convertir - Conversión imagen única")
-    print(f"\n⚡ Capacidad: {gestor.capacidad_maxima:,} imágenes simultáneas")
-    print(f"⚡ IP del nodo: {ip_local}")
-    print(f"⚡ Balanceador configurado: {BALANCEADOR_IP}")
-    print("⚡ CORS habilitado en todos los puertos")
-    print("⚡ Servidores ejecutándose... (Ctrl+C para detener)")
+    print(f"\nâš¡ Capacidad: {gestor.capacidad_maxima:,} imÃ¡genes simultÃ¡neas")
+    print(f"âš¡ IP del nodo: {ip_local}")
+    print(f"âš¡ Balanceador configurado: {BALANCEADOR_IP}:8000 (RPC)")
+    print(f"âš¡ Puerto RPC: {puerto_rpc}")
+    print("âš¡ Comunicación RPC con balanceador habilitada")
+    print("âš¡ Nodo ejecutÃ¡ndose... (Ctrl+C para detener)")
     
     try:
         # Mantener el programa principal vivo
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\n🛑 Deteniendo servidores...")
-        print("✅ Servidores detenidos")
+        print("\nðŸ›' Deteniendo nodo...")
+        print("âœ… Nodo detenido")
 
 
 if __name__ == "__main__":
