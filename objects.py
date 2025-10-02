@@ -155,7 +155,7 @@ class NodoOptimizado:
         self.imagen_original = None
         self.imagen_procesada = None
         self.transformaciones_aplicadas = []
-        self.MAX_TRANSFORMACIONES = 5
+        self.MAX_TRANSFORMACIONES = 20
         
         if imagen_path:
             self.cargar_imagen(imagen_path)
