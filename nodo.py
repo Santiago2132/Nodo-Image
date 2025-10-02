@@ -155,7 +155,30 @@ class GestorNodos:
                                         nodo.redimensionar(size)
                                     except:
                                         nodo.redimensionar()
-                    
+                            elif 'reflejar' in trans:
+                                direccion = trans.split('_')[1] if '_' in trans else 'horizontal'
+                                nodo.reflejar(direccion)
+                            elif 'desenfocar' in trans:
+                                radio = int(trans.split('_')[-1]) if '_' in trans else 2
+                                nodo.desenfocar(radio)
+                            elif 'perfilar' in trans:
+                                factor = float(trans.split('_')[-1]) if '_' in trans else 2.0
+                                nodo.perfilar(factor)
+                            elif 'ajustar_brillo' in trans:
+                                # parsear brillo_X_contraste_Y
+                                parts = trans.split('_')
+                                brillo = float(parts[2]) if len(parts) > 2 else 1.0
+                                contraste = float(parts[4]) if len(parts) > 4 else 1.0
+                                nodo.ajustar_brillo_contraste(brillo, contraste)
+                            elif 'insertar_texto' in trans:
+                                texto = trans.split('_', 2)[2] if '_' in trans else "Marca"
+                                nodo.insertar_texto(texto)
+                            elif 'convertir_a' in trans:
+                                formato = trans.split('_')[-1]
+                                nodo.convertir_formato(formato)
+                            elif 'recortar' in trans:
+                                # Necesitarías definir formato para box
+                                pass
                     nodos_procesados.append(nodo)
                     
                 except Exception as e:
