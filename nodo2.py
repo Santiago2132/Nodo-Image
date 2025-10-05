@@ -5,7 +5,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from werkzeug.serving import make_server
 import xml.etree.ElementTree as ET
-from objects import NodoOptimizado
+from objects2 import NodoOptimizado
 import socket
 import subprocess
 import re
@@ -13,9 +13,13 @@ import json
 import xmlrpc.server
 import xmlrpc.client
 from socketserver import ThreadingMixIn
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import io
+import base64
+import gzip
+from PIL import Image
 
 def obtener_ip_real():
-    """Obtiene la IP real de la máquina en la red local."""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.connect(("8.8.8.8", 80))
@@ -67,56 +71,59 @@ class GestorNodos:
         self.lock = threading.Lock()
     
     def _crear_xml_error(self, mensaje_error):
-        """Crea un XML de respuesta con error."""
         root = ET.Element("error")
         root.text = mensaje_error
         return ET.tostring(root, encoding='unicode')
     
-    def _procesar_imagen_individual(self, imagen_elem, indice, aplicar_transformaciones):
-        """Procesa una imagen individual y retorna el nodo procesado o None si falla."""
-        datos_b64 = imagen_elem.text
-        transformaciones = imagen_elem.get('transformaciones', '')
-        formato = imagen_elem.get('formato', 'JPEG').upper()
-        
-        if not datos_b64:
-            return None, f"Sin datos en imagen {indice}"
-        
-        temp_xml = f"temp_batch_{int(time.time())}_{indice}.xml"
-        
+    def _procesar_imagen_individual_optimizado(self, imagen_elem, indice, aplicar_transformaciones):
+        """Versión optimizada sin archivos temporales."""
         try:
-            # Crear XML temporal con formato original
-            temp_root = ET.Element("imagenes")
-            temp_imagen = ET.SubElement(temp_root, "imagen", {
-                "formato": formato,
-                "transformaciones": transformaciones
-            })
-            temp_imagen.text = datos_b64
+            datos_b64 = imagen_elem.text
+            transformaciones = imagen_elem.get('transformaciones', '')
+            formato = imagen_elem.get('formato', 'JPEG').upper()
             
-            temp_tree = ET.ElementTree(temp_root)
-            temp_tree.write(temp_xml, encoding="utf-8", xml_declaration=True)
+            if not datos_b64:
+                return None, f"Sin datos en imagen {indice}"
             
-            # Cargar con NodoOptimizado
-            nodo = NodoOptimizado(temp_xml)
+            # Procesar directo en memoria
+            datos_comprimidos = base64.b64decode(datos_b64)
+            datos_imagen = gzip.decompress(datos_comprimidos)
+            img = Image.open(io.BytesIO(datos_imagen))
+            
+            nodo = NodoOptimizado()
+            nodo.imagen_original = img
+            nodo.imagen_procesada = img.copy()
             
             if aplicar_transformaciones and transformaciones:
-                self._aplicar_transformaciones(nodo, transformaciones)
+                self._aplicar_transformaciones_optimizado(nodo, transformaciones)
             
             return nodo, None
             
         except Exception as e:
             return None, str(e)
-        finally:
-            if os.path.exists(temp_xml):
-                try:
-                    os.remove(temp_xml)
-                except:
-                    pass
     
-    def _aplicar_transformaciones(self, nodo, transformaciones_str):
-        """Aplica transformaciones a un nodo."""
+    def _aplicar_transformaciones_optimizado(self, nodo, transformaciones_str):
+        """Aplica transformaciones en orden optimizado."""
         trans_list = transformaciones_str.split(', ')
         
+        # Agrupar por tipo
+        ajustes_color = []
+        geometricas = []
+        efectos = []
+        otros = []
+        
         for trans in trans_list:
+            if any(x in trans for x in ['escala_grises', 'ajustar_brillo', 'convertir_a']):
+                ajustes_color.append(trans)
+            elif any(x in trans for x in ['rotar', 'redimensionar', 'reflejar', 'recortar']):
+                geometricas.append(trans)
+            elif any(x in trans for x in ['desenfocar', 'perfilar']):
+                efectos.append(trans)
+            else:
+                otros.append(trans)
+        
+        # Aplicar en orden óptimo
+        for trans in ajustes_color + geometricas + efectos + otros:
             try:
                 if 'escala_grises' in trans:
                     nodo.escala_grises()
@@ -156,39 +163,30 @@ class GestorNodos:
                 elif 'convertir_a' in trans:
                     formato = trans.split('_')[-1].upper()
                     nodo.convertir_formato(formato)
-            except Exception as e:
-                print(f"Error aplicando transformación {trans}: {e}")
+            except Exception:
+                pass
     
-    def _fusionar_nodo_a_xml(self, nodo, root_respuesta, indice, formato_salida, calidad):
-        """Fusiona el resultado de un nodo al XML de respuesta."""
-        temp_output = f"temp_output_batch_{int(time.time())}_{indice}.xml"
-        
+    def _fusionar_nodo_a_xml_optimizado(self, nodo, root_respuesta, indice, formato_salida, calidad):
+        """Versión optimizada sin archivos temporales."""
         try:
-            nodo.generar_xml_optimizado(temp_output, formato_salida, calidad)
+            # Generar XML en memoria
+            b64_data = nodo.convertir_y_comprimir_optimizado(formato_salida, calidad)
             
-            output_tree = ET.parse(temp_output)
-            output_imagen = output_tree.getroot().find('imagen')
+            nueva_imagen = ET.SubElement(root_respuesta, "imagen")
+            nueva_imagen.set("formato", formato_salida)
+            nueva_imagen.set("calidad", str(calidad))
+            nueva_imagen.set("transformaciones", ", ".join(nodo.transformaciones_aplicadas))
+            nueva_imagen.set("total_transformaciones", str(len(nodo.transformaciones_aplicadas)))
+            nueva_imagen.set("indice_procesado", str(indice))
+            nueva_imagen.text = b64_data
             
-            if output_imagen is not None:
-                nueva_imagen = ET.SubElement(root_respuesta, "imagen")
-                nueva_imagen.attrib.update(output_imagen.attrib)
-                nueva_imagen.set("indice_procesado", str(indice))
-                nueva_imagen.text = output_imagen.text
-                return True
+            return True
+            
+        except Exception:
             return False
-            
-        except Exception as e:
-            print(f"Error fusionando imagen {indice}: {e}")
-            return False
-        finally:
-            if os.path.exists(temp_output):
-                try:
-                    os.remove(temp_output)
-                except:
-                    pass
     
     def procesar_xml_imagenes(self, xml_content, aplicar_transformaciones=True):
-        """Procesa XML con múltiples imágenes y aplica transformaciones."""
+        """Versión optimizada con threading."""
         try:
             root = ET.fromstring(xml_content)
             imagenes = root.findall('imagen')
@@ -210,29 +208,36 @@ class GestorNodos:
             root_respuesta.set("total_procesadas", "0")
             root_respuesta.set("total_errores", "0")
             
+            # Procesar en paralelo con máximo 4 workers
             nodos_procesados = []
             formatos_originales = []
             
-            # Procesar cada imagen
-            for i, imagen_elem in enumerate(imagenes):
-                formato_deseado = imagen_elem.get('formato', 'JPEG').upper()
-                formatos_originales.append(formato_deseado)
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                futures = {
+                    executor.submit(
+                        self._procesar_imagen_individual_optimizado,
+                        imagen_elem, i, aplicar_transformaciones
+                    ): (i, imagen_elem.get('formato', 'JPEG').upper())
+                    for i, imagen_elem in enumerate(imagenes)
+                }
                 
-                nodo, error = self._procesar_imagen_individual(imagen_elem, i, aplicar_transformaciones)
-                
-                if error:
-                    error_imagen = ET.SubElement(root_respuesta, "imagen")
-                    error_imagen.set("error", error)
-                    error_imagen.set("indice_original", str(i))
-                else:
-                    nodos_procesados.append((nodo, formato_deseado))
+                for future in as_completed(futures):
+                    i, formato_deseado = futures[future]
+                    nodo, error = future.result()
+                    
+                    if error:
+                        error_imagen = ET.SubElement(root_respuesta, "imagen")
+                        error_imagen.set("error", error)
+                        error_imagen.set("indice_original", str(i))
+                    else:
+                        nodos_procesados.append((nodo, formato_deseado, i))
             
             # Fusionar nodos procesados
             procesadas = 0
             errores = 0
             
-            for j, (nodo, formato_original) in enumerate(nodos_procesados):
-                if self._fusionar_nodo_a_xml(nodo, root_respuesta, j, formato_original, 80):
+            for nodo, formato_original, indice in nodos_procesados:
+                if self._fusionar_nodo_a_xml_optimizado(nodo, root_respuesta, indice, formato_original, 80):
                     procesadas += 1
                 else:
                     errores += 1
@@ -251,11 +256,10 @@ class GestorNodos:
                     self.estado = "disponible"
     
     def procesar_xml_transformaciones(self, xml_content, transformaciones_extra=None):
-        """Procesa XML aplicando transformaciones específicas."""
         return self.procesar_xml_imagenes(xml_content, aplicar_transformaciones=True)
     
     def convertir_imagen_unica(self, xml_content, formato_salida="JPEG", calidad=85):
-        """Convierte una sola imagen."""
+        """Versión optimizada sin archivos temporales."""
         try:
             root = ET.fromstring(xml_content)
             imagenes = root.findall('imagen')
@@ -275,33 +279,24 @@ class GestorNodos:
                 self.imagenes_procesando += 1
                 self.estado = "procesando"
             
-            temp_xml = f"temp_single_{int(time.time())}.xml"
-            temp_output = f"temp_single_out_{int(time.time())}.xml"
-            
             try:
-                temp_root = ET.Element("imagenes")
-                temp_imagen = ET.SubElement(temp_root, "imagen", {
-                    "formato": imagen_elem.get('formato', 'JPEG')
-                })
-                temp_imagen.text = datos_b64
+                # Procesar en memoria
+                datos_comprimidos = base64.b64decode(datos_b64)
+                datos_imagen = gzip.decompress(datos_comprimidos)
+                img = Image.open(io.BytesIO(datos_imagen))
                 
-                temp_tree = ET.ElementTree(temp_root)
-                temp_tree.write(temp_xml, encoding="utf-8", xml_declaration=True)
+                nodo = NodoOptimizado()
+                nodo.imagen_original = img
+                nodo.imagen_procesada = img.copy()
                 
-                nodo = NodoOptimizado(temp_xml)
-                nodo.generar_xml_optimizado(temp_output, formato_salida.upper(), calidad)
-                
-                output_tree = ET.parse(temp_output)
-                output_imagen = output_tree.getroot().find('imagen')
+                # Convertir formato
+                b64_data = nodo.convertir_y_comprimir_optimizado(formato_salida.upper(), calidad)
                 
                 root_respuesta = ET.Element("imagen_convertida")
                 nueva_imagen = ET.SubElement(root_respuesta, "imagen")
-                nueva_imagen.attrib.update(output_imagen.attrib)
-                nueva_imagen.text = output_imagen.text
-                
-                for temp_file in [temp_xml, temp_output]:
-                    if os.path.exists(temp_file):
-                        os.remove(temp_file)
+                nueva_imagen.set("formato", formato_salida.upper())
+                nueva_imagen.set("calidad", str(calidad))
+                nueva_imagen.text = b64_data
                 
                 return ET.tostring(root_respuesta, encoding='unicode')
                 
@@ -317,7 +312,6 @@ class GestorNodos:
             return self._crear_xml_error(f"Error procesando XML: {str(e)}")
     
     def obtener_estado(self):
-        """Retorna el estado actual del gestor."""
         with self.lock:
             return {
                 "estado": self.estado,
@@ -329,7 +323,6 @@ class GestorNodos:
 
 
 class RPCNodoService:
-    """Servicio RPC para el nodo"""
     def __init__(self, gestor):
         self.gestor = gestor
     
@@ -337,7 +330,6 @@ class RPCNodoService:
         return "pong"
     
     def _procesar_con_validacion(self, xml_content, metodo_procesamiento):
-        """Método común para procesar con validación de estado."""
         try:
             estado = self.gestor.obtener_estado()
             if not estado["disponible"]:
@@ -417,7 +409,6 @@ class RPCNodoService:
 
 
 def registrar_nodo_en_balanceador_rpc(ip_nodo):
-    """Registra el nodo en el balanceador de cargas via RPC"""
     try:
         datos_registro = {
             "encendido": "true",
@@ -429,7 +420,7 @@ def registrar_nodo_en_balanceador_rpc(ip_nodo):
             "capacidad_maxima": 100000
         }
         
-        print(f"🔌 Intentando registrar nodo {ip_nodo} en balanceador RPC {BALANCEADOR_RPC_URL}")
+        print(f"📌 Intentando registrar nodo {ip_nodo} en balanceador RPC {BALANCEADOR_RPC_URL}")
         
         balanceador_client = xmlrpc.client.ServerProxy(BALANCEADOR_RPC_URL)
         resultado = balanceador_client.registrar_nodo(json.dumps(datos_registro))
@@ -445,7 +436,6 @@ def registrar_nodo_en_balanceador_rpc(ip_nodo):
 
 
 def iniciar_servidor_rpc_nodo(ip, puerto=9000):
-    """Inicia el servidor RPC del nodo"""
     try:
         server = ThreadedXMLRPCServer((ip, puerto), allow_none=True)
         server.register_introspection_functions()
@@ -484,7 +474,6 @@ def check_health():
 
 
 def ejecutar_servidor_rest(app, puerto, ip_local):
-    """Ejecuta servidor REST opcional."""
     try:
         server = make_server(ip_local, puerto, app)
         print(f"✅ Servidor REST opcional iniciado en {ip_local}:{puerto}")
@@ -494,8 +483,7 @@ def ejecutar_servidor_rest(app, puerto, ip_local):
 
 
 def main():
-    """Función principal que inicia el nodo RPC."""
-    print("🚀 Iniciando Nodo RPC de Imagen...")
+    print("🚀 Iniciando Nodo RPC de Imagen OPTIMIZADO...")
     print("=" * 50)
     
     ip_local = obtener_ip_real()
@@ -511,7 +499,7 @@ def main():
     
     time.sleep(2)
     
-    print("🔌 Registrando nodo en balanceador...")
+    print("📌 Registrando nodo en balanceador...")
     registrar_nodo_en_balanceador_rpc(ip_local)
     
     puerto_rest = 8003
@@ -536,6 +524,14 @@ def main():
     print(f"⚡ IP del nodo: {ip_local}")
     print(f"⚡ Balanceador configurado: {BALANCEADOR_IP}:8000 (RPC)")
     print(f"⚡ Puerto RPC: {puerto_rpc}")
+    print("⚡ OPTIMIZACIONES ACTIVAS:")
+    print("   - Threading paralelo (max 4 workers)")
+    print("   - Sin archivos temporales (procesamiento en memoria)")
+    print("   - Compresión nivel 6 (balance velocidad/tamaño)")
+    print("   - JPEG optimize=False, progressive=False")
+    print("   - Redimensionamiento BILINEAR")
+    print("   - Caché de conversión RGB")
+    print("   - Orden de transformaciones optimizado")
     print("⚡ Nodo ejecutándose... (Ctrl+C para detener)")
     
     try:
