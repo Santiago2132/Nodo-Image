@@ -228,11 +228,13 @@ class NodoOptimizado:
     
     def convertir_formato(self, formato="JPEG"):
         if self._puede_aplicar_transformacion():
-            if formato.upper() in ["JPG", "JPEG"]:
+            formato_upper = formato.upper()
+            if formato_upper in ["JPG", "JPEG"]:
                 if self.imagen_procesada.mode in ("RGBA", "LA", "P"):
                     self.imagen_procesada = self.imagen_procesada.convert("RGB")
                     self._modo_rgb_cache = None
-            self._registrar_transformacion(f"convertir_a_{formato.upper()}")
+                formato_upper = "JPEG"
+            self._registrar_transformacion(f"convertir_a_{formato_upper}")
         return self
     
     def _puede_aplicar_transformacion(self):
@@ -244,29 +246,37 @@ class NodoOptimizado:
     def convertir_y_comprimir_optimizado(self, formato="JPEG", calidad=85, nivel_compresion=6):
         buffer = io.BytesIO()
         
+        # Normalizar formato
+        formato_upper = formato.upper()
+        if formato_upper == "JPG":
+            formato_upper = "JPEG"
+        
         save_options = {}
-        if formato.upper() == "JPEG":
+        if formato_upper in ["JPEG"]:
             save_options = {
                 "quality": calidad, 
                 "optimize": False,
                 "progressive": False
             }
-            if self.imagen_procesada.mode in ("RGBA", "LA", "P"):
+            if self.imagen_procesada.mode in ("RGBA", "LA", "P", "L"):
                 if not self._modo_rgb_cache or self._modo_rgb_cache.mode != "RGB":
                     self._modo_rgb_cache = self.imagen_procesada.convert("RGB")
                 img_to_save = self._modo_rgb_cache
             else:
                 img_to_save = self.imagen_procesada
-        elif formato.upper() == "PNG":
+        elif formato_upper == "PNG":
             save_options = {"optimize": False}
             img_to_save = self.imagen_procesada
-        elif formato.upper() == "WEBP":
+        elif formato_upper == "WEBP":
             save_options = {"quality": calidad, "method": 0}
+            img_to_save = self.imagen_procesada
+        elif formato_upper == "TIFF":
+            save_options = {"compression": "tiff_deflate"}
             img_to_save = self.imagen_procesada
         else:
             img_to_save = self.imagen_procesada
         
-        img_to_save.save(buffer, format=formato.upper(), **save_options)
+        img_to_save.save(buffer, format=formato_upper, **save_options)
         datos = buffer.getvalue()
         datos_gzip = gzip.compress(datos, compresslevel=nivel_compresion)
         datos_b64 = base64.b64encode(datos_gzip).decode("utf-8")

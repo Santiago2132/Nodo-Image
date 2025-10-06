@@ -366,10 +366,10 @@ class RPCNodoService:
     
     def convertir_imagen_unica(self, xml_content, formato_salida="JPEG", calidad=85):
         try:
-            if formato_salida.upper() not in ['JPEG', 'PNG', 'WEBP']:
+            if formato_salida.upper() not in ['JPEG', 'JPG', 'PNG', 'WEBP', 'TIFF']:
                 return json.dumps({
                     "success": False,
-                    "error": "Formato no soportado. Use: JPEG, PNG, WEBP"
+                    "error": "Formato no soportado. Use: JPEG, JPG, PNG, WEBP, TIFF"
                 })
             
             resultado = self.gestor.convertir_imagen_unica(
