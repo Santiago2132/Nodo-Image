@@ -77,16 +77,21 @@ class GestorNodos:
     
     def _procesar_imagen_individual_optimizado(self, imagen_elem, indice, aplicar_transformaciones):
         try:
-            datos_b64 = imagen_elem.text
+            datos_b64 = imagen_elem.text.strip() if imagen_elem.text else ""
             transformaciones = imagen_elem.get('transformaciones', '')
-            formato = imagen_elem.get('formato', 'JPEG').upper()
-            calidad = int(imagen_elem.get('calidad', '85'))  # Agregar calidad por imagen
+            formato_original = imagen_elem.get('formato', 'JPEG').upper()
+            calidad = int(imagen_elem.get('calidad', '85'))
             
             if not datos_b64:
                 return None, f"Sin datos en imagen {indice}", None, None
             
-            datos_comprimidos = base64.b64decode(datos_b64)
-            datos_imagen = gzip.decompress(datos_comprimidos)
+            # Intentar gzip primero, si falla es PNG/JPEG directo
+            try:
+                datos_comprimidos = base64.b64decode(datos_b64)
+                datos_imagen = gzip.decompress(datos_comprimidos)
+            except:
+                datos_imagen = base64.b64decode(datos_b64)
+            
             img = Image.open(io.BytesIO(datos_imagen))
             
             nodo = NodoOptimizado()
@@ -96,16 +101,14 @@ class GestorNodos:
             if aplicar_transformaciones and transformaciones:
                 self._aplicar_transformaciones_optimizado(nodo, transformaciones)
             
-            return nodo, None, formato, calidad  # Retornar formato y calidad
+            return nodo, None, formato_original, calidad
             
         except Exception as e:
             return None, str(e), None, None
     
     def _aplicar_transformaciones_optimizado(self, nodo, transformaciones_str):
-        """Aplica transformaciones en orden optimizado."""
         trans_list = transformaciones_str.split(', ')
         
-        # Agrupar por tipo
         ajustes_color = []
         geometricas = []
         efectos = []
@@ -121,7 +124,6 @@ class GestorNodos:
             else:
                 otros.append(trans)
         
-        # Aplicar en orden óptimo
         for trans in ajustes_color + geometricas + efectos + otros:
             try:
                 if 'escala_grises' in trans:
@@ -166,9 +168,7 @@ class GestorNodos:
                 pass
     
     def _fusionar_nodo_a_xml_optimizado(self, nodo, root_respuesta, indice, formato_salida, calidad):
-        """Versión optimizada sin archivos temporales."""
         try:
-            # Generar XML en memoria
             b64_data = nodo.convertir_y_comprimir_optimizado(formato_salida, calidad)
             
             nueva_imagen = ET.SubElement(root_respuesta, "imagen")
@@ -185,7 +185,6 @@ class GestorNodos:
             return False
     
     def procesar_xml_imagenes(self, xml_content, aplicar_transformaciones=True):
-        """Versión optimizada con threading."""
         try:
             root = ET.fromstring(xml_content)
             imagenes = root.findall('imagen')
@@ -207,7 +206,8 @@ class GestorNodos:
             root_respuesta.set("total_procesadas", "0")
             root_respuesta.set("total_errores", "0")
             
-            nodos_procesados = []
+            # Diccionario para mantener orden: indice -> resultado
+            resultados_por_indice = {}
             
             with ThreadPoolExecutor(max_workers=4) as executor:
                 futures = {
@@ -223,23 +223,31 @@ class GestorNodos:
                     nodo, error, formato, calidad = future.result()
                     
                     if error:
-                        error_imagen = ET.SubElement(root_respuesta, "imagen")
-                        error_imagen.set("error", error)
-                        error_imagen.set("indice_original", str(i))
+                        resultados_por_indice[i] = ("error", error)
                     else:
-                        nodos_procesados.append((nodo, formato, calidad, i))
+                        resultados_por_indice[i] = ("success", nodo, formato, calidad)
             
+            # Insertar en orden original
             procesadas = 0
             errores = 0
             
-            for nodo, formato, calidad, indice in nodos_procesados:
-                if self._fusionar_nodo_a_xml_optimizado(nodo, root_respuesta, indice, formato, calidad):
-                    procesadas += 1
-                else:
+            for i in sorted(resultados_por_indice.keys()):
+                resultado = resultados_por_indice[i]
+                
+                if resultado[0] == "error":
+                    error_imagen = ET.SubElement(root_respuesta, "imagen")
+                    error_imagen.set("error", resultado[1])
+                    error_imagen.set("indice_original", str(i))
                     errores += 1
+                else:
+                    _, nodo, formato, calidad = resultado
+                    if self._fusionar_nodo_a_xml_optimizado(nodo, root_respuesta, i, formato, calidad):
+                        procesadas += 1
+                    else:
+                        errores += 1
             
             root_respuesta.set("total_procesadas", str(procesadas))
-            root_respuesta.set("total_errores", str(errores + (num_imagenes - len(nodos_procesados))))
+            root_respuesta.set("total_errores", str(errores))
             
             return ET.tostring(root_respuesta, encoding='unicode')
             
@@ -255,7 +263,6 @@ class GestorNodos:
         return self.procesar_xml_imagenes(xml_content, aplicar_transformaciones=True)
     
     def convertir_imagen_unica(self, xml_content, formato_salida="JPEG", calidad=85):
-        """Versión optimizada sin archivos temporales."""
         try:
             root = ET.fromstring(xml_content)
             imagenes = root.findall('imagen')
@@ -276,16 +283,18 @@ class GestorNodos:
                 self.estado = "procesando"
             
             try:
-                # Procesar en memoria
-                datos_comprimidos = base64.b64decode(datos_b64)
-                datos_imagen = gzip.decompress(datos_comprimidos)
+                try:
+                    datos_comprimidos = base64.b64decode(datos_b64)
+                    datos_imagen = gzip.decompress(datos_comprimidos)
+                except:
+                    datos_imagen = base64.b64decode(datos_b64)
+                
                 img = Image.open(io.BytesIO(datos_imagen))
                 
                 nodo = NodoOptimizado()
                 nodo.imagen_original = img
                 nodo.imagen_procesada = img.copy()
                 
-                # Convertir formato
                 b64_data = nodo.convertir_y_comprimir_optimizado(formato_salida.upper(), calidad)
                 
                 root_respuesta = ET.Element("imagen_convertida")
@@ -522,12 +531,10 @@ def main():
     print(f"⚡ Puerto RPC: {puerto_rpc}")
     print("⚡ OPTIMIZACIONES ACTIVAS:")
     print("   - Threading paralelo (max 4 workers)")
-    print("   - Sin archivos temporales (procesamiento en memoria)")
-    print("   - Compresión nivel 6 (balance velocidad/tamaño)")
-    print("   - JPEG optimize=False, progressive=False")
-    print("   - Redimensionamiento BILINEAR")
-    print("   - Caché de conversión RGB")
-    print("   - Orden de transformaciones optimizado")
+    print("   - ORDEN PRESERVADO en respuesta")
+    print("   - FORMATO ORIGINAL respetado por imagen")
+    print("   - Soporte PNG base64 sin gzip")
+    print("   - Sin archivos temporales")
     print("⚡ Nodo ejecutándose... (Ctrl+C para detener)")
     
     try:
