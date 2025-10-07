@@ -211,7 +211,7 @@ class NodoOptimizado:
             # Calcular tamaño de fuente dinámicamente si no se proporciona
             if tamaño_fuente is None:
                 ancho, alto = self.imagen_procesada.size
-                tamaño_fuente = max(12, int(0.2 * min(ancho, alto)))  # 20% de la menor dimensión, mínimo 12px
+                tamaño_fuente = max(100, int(0.2 * min(ancho, alto)))  # 20% de la menor dimensión, mínimo 12px
             
             # Cargar fuente con el tamaño calculado o proporcionado (intenta Arial; fallback a default)
             try:
