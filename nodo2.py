@@ -85,7 +85,6 @@ class GestorNodos:
             if not datos_b64:
                 return None, f"Sin datos en imagen {indice}", None, None
             
-            # Intentar gzip primero, si falla es PNG/JPEG directo
             try:
                 datos_comprimidos = base64.b64decode(datos_b64)
                 datos_imagen = gzip.decompress(datos_comprimidos)
@@ -124,7 +123,7 @@ class GestorNodos:
             else:
                 otros.append(trans)
         
-        for trans in ajustes_color + geometricas + efectos + otros:
+        for trans in geometricas + ajustes_color + efectos + otros:
             try:
                 if 'escala_grises' in trans:
                     nodo.escala_grises()
@@ -165,61 +164,58 @@ class GestorNodos:
                 elif 'desenfocar' in trans:
                     try:
                         valor = int(trans.split('_')[-1])
-                        radio = max(0.0, min(10.0, valor / 10.0))
+                        nodo.desenfocar(valor)
                     except:
-                        radio = 2.0
-                    nodo.desenfocar(radio)
+                        nodo.desenfocar(10)
                     
                 elif 'perfilar' in trans:
                     try:
                         valor = int(trans.split('_')[-1])
-                        factor = max(0.0, min(3.0, valor / 33.33))
+                        nodo.perfilar(valor)
                     except:
-                        factor = 2.0
-                    nodo.perfilar(factor)
+                        nodo.perfilar(50)
                     
                 elif 'ajustar_brillo' in trans:
                     parts = trans.split('_')
                     try:
                         brillo_val = int(parts[2]) if len(parts) > 2 else 50
                         contraste_val = int(parts[4]) if len(parts) > 4 else 50
-                        brillo = max(0.0, min(2.0, brillo_val / 50.0))
-                        contraste = max(0.0, min(2.0, contraste_val / 50.0))
+                        nodo.ajustar_brillo_contraste(brillo_val, contraste_val)
                     except:
-                        brillo = 1.0
-                        contraste = 1.0
-                    nodo.ajustar_brillo_contraste(brillo, contraste)
+                        nodo.ajustar_brillo_contraste(50, 50)
                     
                 elif 'ajustar_nitidez' in trans:
                     try:
                         nivel = int(trans.split('_')[-1])
-                        nivel = max(0, min(10, nivel))
+                        nodo.ajustar_nitidez(nivel)
                     except:
-                        nivel = 5
-                    nodo.ajustar_nitidez(nivel)
+                        nodo.ajustar_nitidez(50)
                     
                 elif 'ajustar_saturacion' in trans:
                     try:
                         nivel = int(trans.split('_')[-1])
-                        nivel = max(0, min(10, nivel))
+                        nodo.ajustar_saturacion(nivel)
                     except:
-                        nivel = 5
-                    nodo.ajustar_saturacion(nivel)
+                        nodo.ajustar_saturacion(50)
                     
                 elif 'insertar_texto' in trans:
                     parts = trans.split('_')
                     if len(parts) < 3:
                         texto = "Marca"
                         posicion = (10, 10)
+                        tamano = 20
                     else:
-                        # Buscar índices de 'pos' y 'tam'
                         try:
                             pos_idx = parts.index('pos')
                             x = int(parts[pos_idx + 1])
                             y = int(parts[pos_idx + 2])
                             posicion = (x, y)
-                            # Texto es todo entre 'texto' y 'pos'
                             texto = '_'.join(parts[2:pos_idx])
+                            try:
+                                tam_idx = parts.index('tam')
+                                tamano = int(parts[tam_idx + 1])
+                            except:
+                                tamano = 20
                         except:
                             texto = '_'.join(parts[2:-2]) if len(parts) > 4 else parts[2]
                             try:
@@ -228,8 +224,9 @@ class GestorNodos:
                                 posicion = (x, y)
                             except:
                                 posicion = (10, 10)
+                            tamano = 20
                     
-                    nodo.insertar_texto(texto, posicion=posicion)
+                    nodo.insertar_texto(texto, posicion=posicion, tamano_fuente=tamano)
                     
             except Exception:
                 pass
@@ -273,7 +270,6 @@ class GestorNodos:
             root_respuesta.set("total_procesadas", "0")
             root_respuesta.set("total_errores", "0")
             
-            # Diccionario para mantener orden: indice -> resultado
             resultados_por_indice = {}
             
             with ThreadPoolExecutor(max_workers=4) as executor:
@@ -294,7 +290,6 @@ class GestorNodos:
                     else:
                         resultados_por_indice[i] = ("success", nodo, formato, calidad)
             
-            # Insertar en orden original
             procesadas = 0
             errores = 0
             
