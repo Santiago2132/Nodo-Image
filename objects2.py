@@ -5,7 +5,7 @@ import os
 import xml.etree.ElementTree as ET
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 import datetime
-
+from PIL import ImageFont  # Añadir esta línea
 
 class LectorXML:
     """Clase para leer y mostrar contenido de archivos XML generados por la clase Nodo."""
@@ -204,10 +204,20 @@ class NodoOptimizado:
             self._registrar_transformacion(f"ajustar_brillo_{brillo}_contraste_{contraste}")
         return self
     
-    def insertar_texto(self, texto="Marca de agua", posicion=(10, 10), color=(255, 255, 255)):
+    def insertar_texto(self, texto="Marca de agua", posicion=(10, 10), color=(255, 255, 255), tamaño_fuente=20):
         if self._puede_aplicar_transformacion():
             draw = ImageDraw.Draw(self.imagen_procesada)
             
+            # Cargar fuente con tamaño (intenta Arial; fallback a default si no existe)
+            try:
+                # Busca una fuente común en el sistema (Arial, o usa 'arial.ttf' si lo tienes)
+                fuente = ImageFont.truetype("arial.ttf", tamaño_fuente)  # Cambia por ruta si es necesario, ej: "/path/to/arial.ttf"
+            except IOError:
+                # Fallback a fuente predeterminada de Pillow (tamaño fijo ~10, pero usamos el parámetro como aproximación)
+                fuente = ImageFont.load_default()
+                # Nota: load_default() ignora tamaño_fuente, pero es portable
+            
+            # Ajustar color según modo de imagen (igual que antes)
             if self.imagen_procesada.mode == "L":
                 if isinstance(color, tuple):
                     if len(color) >= 3:
@@ -216,14 +226,14 @@ class NodoOptimizado:
                         color_gris = color[0] if len(color) > 0 else 255
                 else:
                     color_gris = color
-                draw.text(posicion, texto, fill=color_gris)
+                draw.text(posicion, texto, fill=color_gris, font=fuente)
             elif self.imagen_procesada.mode == "1":
                 color_binario = 255 if sum(color) > 384 else 0
-                draw.text(posicion, texto, fill=color_binario)
+                draw.text(posicion, texto, fill=color_binario, font=fuente)
             else:
-                draw.text(posicion, texto, fill=color)
+                draw.text(posicion, texto, fill=color, font=fuente)
             
-            self._registrar_transformacion(f"insertar_texto_{texto}")
+            self._registrar_transformacion(f"insertar_texto_{texto}_pos_{posicion[0]}_{posicion[1]}_tam_{tamaño_fuente}")
         return self
     
     def convertir_formato(self, formato="JPEG"):
