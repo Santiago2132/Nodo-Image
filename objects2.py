@@ -3,8 +3,9 @@ import gzip
 import io
 import os
 import xml.etree.ElementTree as ET
-from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 import datetime
+from PIL import ImageFont
 
 class LectorXML:
     """Clase para leer y mostrar contenido de archivos XML generados por la clase Nodo."""
@@ -25,16 +26,16 @@ class LectorXML:
             return
         
         root = self.tree.getroot()
-        tamano_archivo = os.path.getsize(self.archivo_xml) / 1024
+        tamaño_archivo = os.path.getsize(self.archivo_xml) / 1024
         
         for i, imagen in enumerate(root.findall('imagen'), 1):
             datos_b64 = imagen.text
             if datos_b64:
-                tamano_b64 = len(datos_b64)
+                tamaño_b64 = len(datos_b64)
                 try:
                     datos_comprimidos = base64.b64decode(datos_b64)
                     datos_descomprimidos = gzip.decompress(datos_comprimidos)
-                    tamano_original = len(datos_descomprimidos) / 1024
+                    tamaño_original = len(datos_descomprimidos) / 1024
                     ratio_compresion = len(datos_comprimidos) / len(datos_descomprimidos) * 100
                 except Exception:
                     pass
@@ -63,7 +64,7 @@ class LectorXML:
         except Exception:
             pass
     
-    def comparar_tamanos(self):
+    def comparar_tamaños(self):
         if not self.tree:
             return
         
@@ -85,6 +86,7 @@ class NodoOptimizado:
         self.imagen_procesada = None
         self.transformaciones_aplicadas = []
         self.MAX_TRANSFORMACIONES = 20
+        self._modo_rgb_cache = None
         
         if imagen_path:
             self.cargar_imagen(imagen_path)
@@ -142,37 +144,29 @@ class NodoOptimizado:
     
     def escala_grises(self):
         if self._puede_aplicar_transformacion():
-            self.imagen_procesada = self.imagen_procesada.convert("L").convert("RGB")
+            self.imagen_procesada = self.imagen_procesada.convert("L")
+            self._modo_rgb_cache = None
             self._registrar_transformacion("escala_grises")
         return self
     
     def redimensionar(self, size=(200, 200)):
         if self._puede_aplicar_transformacion():
             self.imagen_procesada = self.imagen_procesada.resize(size, Image.Resampling.BILINEAR)
+            self._modo_rgb_cache = None
             self._registrar_transformacion(f"redimensionar_{size[0]}x{size[1]}")
         return self
     
     def recortar(self, box=(0, 0, 100, 100)):
         if self._puede_aplicar_transformacion():
-            width, height = self.imagen_procesada.size
-            x1, y1, x2, y2 = box
-            x1 = max(0, min(x1, width))
-            y1 = max(0, min(y1, height))
-            x2 = max(0, min(x2, width))
-            y2 = max(0, min(y2, height))
-            if x2 > x1 and y2 > y1:
-                self.imagen_procesada = self.imagen_procesada.crop((x1, y1, x2, y2))
-                self._registrar_transformacion(f"recortar_{x1}_{y1}_{x2}_{y2}")
+            self.imagen_procesada = self.imagen_procesada.crop(box)
+            self._modo_rgb_cache = None
+            self._registrar_transformacion(f"recortar_{box[0]}_{box[1]}_{box[2]}_{box[3]}")
         return self
     
     def rotar(self, angle=45):
         if self._puede_aplicar_transformacion():
-            if self.imagen_procesada.mode in ("RGBA", "LA"):
-                self.imagen_procesada = self.imagen_procesada.rotate(angle, expand=True, fillcolor=(255, 255, 255, 0))
-            else:
-                if self.imagen_procesada.mode != "RGB":
-                    self.imagen_procesada = self.imagen_procesada.convert("RGB")
-                self.imagen_procesada = self.imagen_procesada.rotate(angle, expand=True, fillcolor=(255, 255, 255))
+            self.imagen_procesada = self.imagen_procesada.rotate(angle, expand=True, fillcolor='white')
+            self._modo_rgb_cache = None
             self._registrar_transformacion(f"rotar_{angle}")
         return self
     
@@ -184,88 +178,82 @@ class NodoOptimizado:
                 self.imagen_procesada = self.imagen_procesada.transpose(Image.FLIP_TOP_BOTTOM)
             else:
                 self.imagen_procesada = self.imagen_procesada.transpose(Image.FLIP_LEFT_RIGHT)
+            self._modo_rgb_cache = None
             self._registrar_transformacion(f"reflejar_{direccion}")
         return self
     
-    def desenfocar(self, nivel=10):
-        """Desenfoca la imagen. Rango: 0-100 (0=sin desenfoque, 100=máximo desenfoque)"""
+    def desenfocar(self, radio=2):
         if self._puede_aplicar_transformacion():
-            if self.imagen_procesada.mode not in ("RGB", "RGBA", "L"):
-                self.imagen_procesada = self.imagen_procesada.convert("RGB")
-            radio = max(0.0, min(50.0, nivel / 2.0))
-            if radio > 0:
-                self.imagen_procesada = self.imagen_procesada.filter(ImageFilter.GaussianBlur(radio))
-            self._registrar_transformacion(f"desenfocar_{nivel}")
+            self.imagen_procesada = self.imagen_procesada.filter(ImageFilter.GaussianBlur(radio))
+            self._registrar_transformacion(f"desenfocar_{int(radio * 10)}")
         return self
     
-    def perfilar(self, nivel=50):
-        """Perfila/agudiza la imagen. Rango: 0-100 (0=muy suave, 50=normal, 100=muy perfilado)"""
+    def perfilar(self, factor=2.0):
         if self._puede_aplicar_transformacion():
-            if self.imagen_procesada.mode not in ("RGB", "RGBA", "L"):
-                self.imagen_procesada = self.imagen_procesada.convert("RGB")
-            factor = max(0.0, min(5.0, nivel / 20.0))
             enhancer = ImageEnhance.Sharpness(self.imagen_procesada)
             self.imagen_procesada = enhancer.enhance(factor)
-            self._registrar_transformacion(f"perfilar_{nivel}")
+            self._registrar_transformacion(f"perfilar_{int(factor * 33.33)}")
         return self
     
-    def ajustar_brillo_contraste(self, brillo=50, contraste=50):
-        """Ajusta brillo y contraste. Rango: 0-100 (50=normal)"""
+    def ajustar_brillo_contraste(self, brillo=1.0, contraste=1.0):
         if self._puede_aplicar_transformacion():
-            if self.imagen_procesada.mode not in ("RGB", "RGBA", "L"):
-                self.imagen_procesada = self.imagen_procesada.convert("RGB")
-            factor_brillo = max(0.0, min(2.0, brillo / 50.0))
-            factor_contraste = max(0.0, min(2.0, contraste / 50.0))
-            
+            # FIX: Clamp min a 0.1 para evitar negro accidental, pero permite 0 si explícito
+            brillo = max(0.1, brillo) if brillo > 0 else brillo
+            contraste = max(0.1, contraste) if contraste > 0 else contraste
             enhancer_brillo = ImageEnhance.Brightness(self.imagen_procesada)
-            self.imagen_procesada = enhancer_brillo.enhance(factor_brillo)
+            self.imagen_procesada = enhancer_brillo.enhance(brillo)
             enhancer_contraste = ImageEnhance.Contrast(self.imagen_procesada)
-            self.imagen_procesada = enhancer_contraste.enhance(factor_contraste)
-            self._registrar_transformacion(f"ajustar_brillo_{brillo}_contraste_{contraste}")
+            self.imagen_procesada = enhancer_contraste.enhance(contraste)
+            self._registrar_transformacion(f"ajustar_brillo_{int(brillo * 50)}_contraste_{int(contraste * 50)}")
         return self
     
-    def ajustar_nitidez(self, nivel=50):
-        """Ajusta nitidez. Rango: 0-100 (0=muy borroso, 50=normal, 100=muy nítido)"""
+    def ajustar_nitidez(self, nivel=50):  # FIX: Cambiado a 0-100 (50=normal)
+        """Ajusta nitidez. nivel: 0-100 (0=muy borroso, 50=normal, 100=muy nítido)"""
         if self._puede_aplicar_transformacion():
-            if self.imagen_procesada.mode not in ("RGB", "RGBA", "L"):
-                self.imagen_procesada = self.imagen_procesada.convert("RGB")
-            factor = max(0.0, min(5.0, nivel / 20.0))
+            factor = max(0.0, min(2.0, nivel / 50.0))  # FIX: Estandarizado a 0-100 -> 0.0-2.0
             enhancer = ImageEnhance.Sharpness(self.imagen_procesada)
             self.imagen_procesada = enhancer.enhance(factor)
             self._registrar_transformacion(f"ajustar_nitidez_{nivel}")
         return self
 
-    def ajustar_saturacion(self, nivel=50):
-        """Ajusta saturación. Rango: 0-100 (0=grises, 50=normal, 100=muy saturado)"""
+    def ajustar_saturacion(self, nivel=50):  # FIX: Cambiado a 0-100 (50=normal)
+        """Ajusta saturación. nivel: 0-100 (0=grises, 50=normal, 100=muy saturado)"""
         if self._puede_aplicar_transformacion():
-            if self.imagen_procesada.mode not in ("RGB", "RGBA"):
-                self.imagen_procesada = self.imagen_procesada.convert("RGB")
-            factor = max(0.0, min(3.0, nivel / 33.33))
+            factor = max(0.0, min(2.0, nivel / 50.0))  # FIX: Estandarizado a 0-100 -> 0.0-2.0
             enhancer = ImageEnhance.Color(self.imagen_procesada)
             self.imagen_procesada = enhancer.enhance(factor)
             self._registrar_transformacion(f"ajustar_saturacion_{nivel}")
         return self
     
-    def insertar_texto(self, texto="Marca de agua", posicion=(10, 10), color=(255, 255, 255), tamano_fuente=20):
+    def insertar_texto(self, texto="Marca de agua", posicion=(10, 10), color=(255, 255, 255), tamaño_fuente=None):
         if self._puede_aplicar_transformacion():
-            if self.imagen_procesada.mode not in ("RGB", "RGBA"):
-                self.imagen_procesada = self.imagen_procesada.convert("RGB")
-            
             draw = ImageDraw.Draw(self.imagen_procesada)
             
-            tamano_fuente = max(8, min(500, int(tamano_fuente)))
+            if tamaño_fuente is None:
+                ancho, alto = self.imagen_procesada.size
+                tamaño_fuente = max(20, int(0.08 * min(ancho, alto)))
             
             try:
-                fuente = ImageFont.truetype("arial.ttf", tamano_fuente)
-            except:
-                try:
-                    fuente = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", tamano_fuente)
-                except:
-                    fuente = ImageFont.load_default()
+                fuente = ImageFont.truetype("arial.ttf", tamaño_fuente)
+            except IOError:
+                fuente = ImageFont.load_default()
             
-            draw.text(posicion, texto, fill=color, font=fuente)
+            if self.imagen_procesada.mode == "L":
+                if isinstance(color, tuple):
+                    if len(color) >= 3:
+                        color_gris = int(0.299 * color[0] + 0.587 * color[1] + 0.114 * color[2])
+                    else:
+                        color_gris = color[0] if len(color) > 0 else 255
+                else:
+                    color_gris = color
+                draw.text(posicion, texto, fill=color_gris, font=fuente)
+            elif self.imagen_procesada.mode == "1":
+                color_binario = 255 if sum(color) > 384 else 0
+                draw.text(posicion, texto, fill=color_binario, font=fuente)
+            else:
+                draw.text(posicion, texto, fill=color, font=fuente)
             
-            self._registrar_transformacion(f"insertar_texto_{texto}_pos_{posicion[0]}_{posicion[1]}_tam_{tamano_fuente}")
+            self._registrar_transformacion(f"insertar_texto_{texto}_pos_{posicion[0]}_{posicion[1]}_tam_{tamaño_fuente}")
         return self
     
     def _puede_aplicar_transformacion(self):
@@ -281,26 +269,30 @@ class NodoOptimizado:
         if formato_upper == "JPG":
             formato_upper = "JPEG"
         
-        img_to_save = self.imagen_procesada
-        
-        if self.imagen_procesada.mode not in ("RGB", "RGBA", "L", "P"):
-            img_to_save = self.imagen_procesada.convert("RGB")
-        
         save_options = {}
-        if formato_upper == "JPEG":
-            if img_to_save.mode in ("RGBA", "LA", "P"):
-                img_to_save = img_to_save.convert("RGB")
+        if formato_upper in ["JPEG"]:
             save_options = {
                 "quality": calidad, 
                 "optimize": False,
                 "progressive": False
             }
+            if self.imagen_procesada.mode in ("RGBA", "LA", "P", "L"):
+                if not self._modo_rgb_cache or self._modo_rgb_cache.mode != "RGB":
+                    self._modo_rgb_cache = self.imagen_procesada.convert("RGB")
+                img_to_save = self._modo_rgb_cache
+            else:
+                img_to_save = self.imagen_procesada
         elif formato_upper == "PNG":
             save_options = {"optimize": False}
+            img_to_save = self.imagen_procesada
         elif formato_upper == "WEBP":
             save_options = {"quality": calidad, "method": 0}
+            img_to_save = self.imagen_procesada
         elif formato_upper == "TIFF":
             save_options = {"compression": "tiff_deflate"}
+            img_to_save = self.imagen_procesada
+        else:
+            img_to_save = self.imagen_procesada
         
         img_to_save.save(buffer, format=formato_upper, **save_options)
         datos = buffer.getvalue()
@@ -323,8 +315,8 @@ class NodoOptimizado:
             "transformaciones": ", ".join(self.transformaciones_aplicadas),
             "total_transformaciones": str(len(self.transformaciones_aplicadas)),
             "fecha_generacion": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "tamano_original": f"{self.imagen_original.size[0]}x{self.imagen_original.size[1]}" if self.imagen_original else "N/A",
-            "tamano_final": f"{self.imagen_procesada.size[0]}x{self.imagen_procesada.size[1]}"
+            "tamaño_original": f"{self.imagen_original.size[0]}x{self.imagen_original.size[1]}" if self.imagen_original else "N/A",
+            "tamaño_final": f"{self.imagen_procesada.size[0]}x{self.imagen_procesada.size[1]}"
         })
         nodo.text = b64_data
         

@@ -123,7 +123,7 @@ class GestorNodos:
             else:
                 otros.append(trans)
         
-        for trans in geometricas + ajustes_color + efectos + otros:
+        for trans in ajustes_color + geometricas + efectos + otros:
             try:
                 if 'escala_grises' in trans:
                     nodo.escala_grises()
@@ -164,69 +164,84 @@ class GestorNodos:
                 elif 'desenfocar' in trans:
                     try:
                         valor = int(trans.split('_')[-1])
-                        nodo.desenfocar(valor)
+                        valor = max(0, min(100, valor))  # FIX: Estandarizado a 0-100
+                        radio = max(0.1, min(10.0, valor / 10.0))  # FIX: Clamp min 0.1 para efecto visible; 100 -> 10.0 max
                     except:
-                        nodo.desenfocar(10)
+                        radio = 2.0
+                    nodo.desenfocar(radio)
                     
                 elif 'perfilar' in trans:
                     try:
                         valor = int(trans.split('_')[-1])
-                        nodo.perfilar(valor)
+                        valor = max(0, min(100, valor))  # FIX: Estandarizado a 0-100
+                        factor = max(0.0, min(3.0, valor / 33.33))
                     except:
-                        nodo.perfilar(50)
+                        factor = 2.0
+                    nodo.perfilar(factor)
                     
                 elif 'ajustar_brillo' in trans:
                     parts = trans.split('_')
                     try:
                         brillo_val = int(parts[2]) if len(parts) > 2 else 50
                         contraste_val = int(parts[4]) if len(parts) > 4 else 50
-                        nodo.ajustar_brillo_contraste(brillo_val, contraste_val)
+                        brillo_val = max(0, min(100, brillo_val))  # FIX: Clamp 0-100
+                        contraste_val = max(0, min(100, contraste_val))
+                        brillo = max(0.1, min(2.0, brillo_val / 50.0))  # FIX: Clamp min 0.1 para evitar negro; 50->1.0
+                        contraste = max(0.1, min(2.0, contraste_val / 50.0))
                     except:
-                        nodo.ajustar_brillo_contraste(50, 50)
+                        brillo = 1.0
+                        contraste = 1.0
+                    nodo.ajustar_brillo_contraste(brillo, contraste)
                     
                 elif 'ajustar_nitidez' in trans:
                     try:
                         nivel = int(trans.split('_')[-1])
-                        nodo.ajustar_nitidez(nivel)
+                        nivel = max(0, min(100, nivel))  # FIX: Cambiado a 0-100
                     except:
-                        nodo.ajustar_nitidez(50)
+                        nivel = 50
+                    nodo.ajustar_nitidez(nivel)
                     
                 elif 'ajustar_saturacion' in trans:
                     try:
                         nivel = int(trans.split('_')[-1])
-                        nodo.ajustar_saturacion(nivel)
+                        nivel = max(0, min(100, nivel))  # FIX: Cambiado a 0-100
                     except:
-                        nodo.ajustar_saturacion(50)
+                        nivel = 50
+                    nodo.ajustar_saturacion(nivel)
                     
                 elif 'insertar_texto' in trans:
                     parts = trans.split('_')
+                    texto = "Marca"
+                    posicion = (10, 10)
+                    tamaño_fuente = None  # FIX: Ahora parseamos tam
                     if len(parts) < 3:
-                        texto = "Marca"
-                        posicion = (10, 10)
-                        tamano = 20
+                        pass
                     else:
                         try:
                             pos_idx = parts.index('pos')
+                            tam_idx = parts.index('tam') if 'tam' in parts else -1
                             x = int(parts[pos_idx + 1])
                             y = int(parts[pos_idx + 2])
                             posicion = (x, y)
-                            texto = '_'.join(parts[2:pos_idx])
-                            try:
-                                tam_idx = parts.index('tam')
-                                tamano = int(parts[tam_idx + 1])
-                            except:
-                                tamano = 20
+                            if tam_idx != -1:
+                                tamaño_fuente = int(parts[tam_idx + 1])
+                            texto_start = 2  # 'insertar_texto_'
+                            texto_end = pos_idx if tam_idx == -1 or tam_idx > pos_idx else tam_idx
+                            texto = '_'.join(parts[texto_start:texto_end])
                         except:
-                            texto = '_'.join(parts[2:-2]) if len(parts) > 4 else parts[2]
+                            texto = '_'.join(parts[2:-3]) if len(parts) > 5 else '_'.join(parts[2:-2])  # FIX: Ajuste para tam
                             try:
-                                x = int(parts[-2])
-                                y = int(parts[-1])
+                                if len(parts) > 4:
+                                    tamaño_fuente = int(parts[-1]) if 'tam' in parts else None
+                                    x = int(parts[-3])
+                                    y = int(parts[-2])
+                                else:
+                                    x = int(parts[-2])
+                                    y = int(parts[-1])
                                 posicion = (x, y)
                             except:
                                 posicion = (10, 10)
-                            tamano = 20
-                    
-                    nodo.insertar_texto(texto, posicion=posicion, tamano_fuente=tamano)
+                    nodo.insertar_texto(texto, posicion=posicion, tamaño_fuente=tamaño_fuente)
                     
             except Exception:
                 pass
