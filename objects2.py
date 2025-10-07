@@ -204,7 +204,7 @@ class NodoOptimizado:
             self._registrar_transformacion(f"ajustar_brillo_{brillo}_contraste_{contraste}")
         return self
     
-    def insertar_texto(self, texto="Marca de agua", posicion=(10, 10), color=(255, 255, 255), tamaño_fuente=20):
+    def insertar_texto(self, texto="Marca de agua", posicion=(10, 10), color=(255, 255, 255), tamaño_fuente=100):
         if self._puede_aplicar_transformacion():
             draw = ImageDraw.Draw(self.imagen_procesada)
             
