@@ -160,7 +160,7 @@ class NodoOptimizado:
         if self._puede_aplicar_transformacion():
             self.imagen_procesada = self.imagen_procesada.crop(box)
             self._modo_rgb_cache = None
-            self._registrar_transformacion(f"recortar_{box}")
+            self._registrar_transformacion(f"recortar_{box[0]}_{box[1]}_{box[2]}_{box[3]}")
         return self
     
     def rotar(self, angle=45):
@@ -203,7 +203,25 @@ class NodoOptimizado:
             self.imagen_procesada = enhancer_contraste.enhance(contraste)
             self._registrar_transformacion(f"ajustar_brillo_{brillo}_contraste_{contraste}")
         return self
-    
+    def ajustar_nitidez(self, nivel=5):
+        """Ajusta nitidez. nivel: 0-10 (0=muy borroso, 5=normal, 10=muy nítido)"""
+        if self._puede_aplicar_transformacion():
+            # Mapear 0-10 a factor 0.0-2.0
+            factor = nivel / 5.0
+            enhancer = ImageEnhance.Sharpness(self.imagen_procesada)
+            self.imagen_procesada = enhancer.enhance(factor)
+            self._registrar_transformacion(f"ajustar_nitidez_{nivel}")
+        return self
+
+    def ajustar_saturacion(self, nivel=5):
+        """Ajusta saturación. nivel: 0-10 (0=grises, 5=normal, 10=muy saturado)"""
+        if self._puede_aplicar_transformacion():
+            # Mapear 0-10 a factor 0.0-2.0
+            factor = nivel / 5.0
+            enhancer = ImageEnhance.Color(self.imagen_procesada)
+            self.imagen_procesada = enhancer.enhance(factor)
+            self._registrar_transformacion(f"ajustar_saturacion_{nivel}")
+        return self
     def insertar_texto(self, texto="Marca de agua", posicion=(10, 10), color=(255, 255, 255), tamaño_fuente=None):
         if self._puede_aplicar_transformacion():
             draw = ImageDraw.Draw(self.imagen_procesada)
@@ -211,7 +229,7 @@ class NodoOptimizado:
             # Calcular tamaño de fuente dinámicamente si no se proporciona
             if tamaño_fuente is None:
                 ancho, alto = self.imagen_procesada.size
-                tamaño_fuente = max(100, int(0.2 * min(ancho, alto)))  # 20% de la menor dimensión, mínimo 12px
+                tamaño_fuente = max(100, int(0.08 * min(ancho, alto)))  # 20% de la menor dimensión, mínimo 12px
             
             # Cargar fuente con el tamaño calculado o proporcionado (intenta Arial; fallback a default)
             try:
