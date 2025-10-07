@@ -204,18 +204,24 @@ class NodoOptimizado:
             self._registrar_transformacion(f"ajustar_brillo_{brillo}_contraste_{contraste}")
         return self
     
-    def insertar_texto(self, texto="Marca de agua", posicion=(10, 10), color=(255, 255, 255), tamaño_fuente=100):
+    def insertar_texto(self, texto="Marca de agua", posicion=(10, 10), color=(255, 255, 255), tamaño_fuente=None):
         if self._puede_aplicar_transformacion():
             draw = ImageDraw.Draw(self.imagen_procesada)
             
-            # Cargar fuente con tamaño (intenta Arial; fallback a default si no existe)
+            # Calcular tamaño de fuente dinámicamente si no se proporciona
+            if tamaño_fuente is None:
+                ancho, alto = self.imagen_procesada.size
+                tamaño_fuente = max(12, int(0.2 * min(ancho, alto)))  # 20% de la menor dimensión, mínimo 12px
+            
+            # Cargar fuente con el tamaño calculado o proporcionado (intenta Arial; fallback a default)
             try:
                 # Busca una fuente común en el sistema (Arial, o usa 'arial.ttf' si lo tienes)
-                fuente = ImageFont.truetype("arial.ttf", tamaño_fuente)  # Cambia por ruta si es necesario, ej: "/path/to/arial.ttf"
+                # Cambia por ruta si es necesario, ej: "/path/to/arial.ttf" o r"C:\Windows\Fonts\arial.ttf"
+                fuente = ImageFont.truetype("arial.ttf", tamaño_fuente)
             except IOError:
-                # Fallback a fuente predeterminada de Pillow (tamaño fijo ~10, pero usamos el parámetro como aproximación)
+                # Fallback a fuente predeterminada de Pillow (tamaño fijo ~10, pero portable)
                 fuente = ImageFont.load_default()
-                # Nota: load_default() ignora tamaño_fuente, pero es portable
+                # Nota: load_default() ignora tamaño_fuente, pero es un fallback seguro
             
             # Ajustar color según modo de imagen (igual que antes)
             if self.imagen_procesada.mode == "L":
@@ -233,18 +239,8 @@ class NodoOptimizado:
             else:
                 draw.text(posicion, texto, fill=color, font=fuente)
             
+            # Registrar con el tamaño usado (calculado o explícito)
             self._registrar_transformacion(f"insertar_texto_{texto}_pos_{posicion[0]}_{posicion[1]}_tam_{tamaño_fuente}")
-        return self
-    
-    def convertir_formato(self, formato="JPEG"):
-        if self._puede_aplicar_transformacion():
-            formato_upper = formato.upper()
-            if formato_upper in ["JPG", "JPEG"]:
-                if self.imagen_procesada.mode in ("RGBA", "LA", "P"):
-                    self.imagen_procesada = self.imagen_procesada.convert("RGB")
-                    self._modo_rgb_cache = None
-                formato_upper = "JPEG"
-            self._registrar_transformacion(f"convertir_a_{formato_upper}")
         return self
     
     def _puede_aplicar_transformacion(self):
