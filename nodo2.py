@@ -148,15 +148,35 @@ class GestorNodos:
                     direccion = trans.split('_')[1] if '_' in trans else 'horizontal'
                     nodo.reflejar(direccion)
                 elif 'desenfocar' in trans:
-                    radio = int(trans.split('_')[-1]) if '_' in trans else 2
+                    # Extraer valor 0-100 y mapear a radio 0-10
+                    try:
+                        valor = int(trans.split('_')[-1])
+                        radio = max(0, min(10, valor / 10.0))
+                    except:
+                        radio = 2
                     nodo.desenfocar(radio)
+                    
                 elif 'perfilar' in trans:
-                    factor = float(trans.split('_')[-1]) if '_' in trans else 2.0
+                    # Extraer valor 0-100 y mapear a factor 0.0-3.0
+                    try:
+                        valor = int(trans.split('_')[-1])
+                        factor = max(0.0, min(3.0, valor / 33.33))
+                    except:
+                        factor = 2.0
                     nodo.perfilar(factor)
+                    
                 elif 'ajustar_brillo' in trans:
                     parts = trans.split('_')
-                    brillo = float(parts[2]) if len(parts) > 2 else 1.0
-                    contraste = float(parts[4]) if len(parts) > 4 else 1.0
+                    try:
+                        # Esperar formato: ajustar_brillo_B_contraste_C (valores 0-100)
+                        brillo_val = int(parts[2]) if len(parts) > 2 else 50
+                        contraste_val = int(parts[4]) if len(parts) > 4 else 50
+                        # Mapear 0-100 a 0.0-2.0
+                        brillo = max(0.0, min(2.0, brillo_val / 50.0))
+                        contraste = max(0.0, min(2.0, contraste_val / 50.0))
+                    except:
+                        brillo = 1.0
+                        contraste = 1.0
                     nodo.ajustar_brillo_contraste(brillo, contraste)
                 elif 'insertar_texto' in trans:
                     # Dividir la cadena: ['insertar', 'texto', 'TextoConPosiblesGuiones', 'X', 'Y']
@@ -181,6 +201,21 @@ class GestorNodos:
                             posicion = (10, 10)
                     
                     nodo.insertar_texto(texto, posicion=posicion)  # Usa el método existente, que ya soporta (x, y)
+                elif 'ajustar_nitidez' in trans:
+                    try:
+                        nivel = int(trans.split('_')[-1])
+                        nivel = max(0, min(10, nivel))
+                    except:
+                        nivel = 5
+                    nodo.ajustar_nitidez(nivel)
+                    
+                elif 'ajustar_saturacion' in trans:
+                    try:
+                        nivel = int(trans.split('_')[-1])
+                        nivel = max(0, min(10, nivel))
+                    except:
+                        nivel = 5
+                    nodo.ajustar_saturacion(nivel)
                 elif 'convertir_a' in trans:
                     formato = trans.split('_')[-1].upper()
                     nodo.convertir_formato(formato)

@@ -35,6 +35,6 @@ def procesar_xml(ruta_xml: str, formato_salida: str = "PNG"):
 # Ejemplo de uso
 # -------------------------------
 if __name__ == "__main__":
-    ruta = "resultado_cadena_final.xml"  # tu archivo XML
+    ruta = "imagen_base.xml"  # tu archivo XML
     formato = "PNG"  # Cambia a "JPEG", "PNG" o "AVIF"
     procesar_xml(ruta, formato)
