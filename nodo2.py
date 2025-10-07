@@ -115,7 +115,7 @@ class GestorNodos:
         otros = []
         
         for trans in trans_list:
-            if any(x in trans for x in ['escala_grises', 'ajustar_brillo', 'convertir_a']):
+            if any(x in trans for x in ['escala_grises', 'ajustar_brillo', 'ajustar_saturacion', 'ajustar_nitidez']):
                 ajustes_color.append(trans)
             elif any(x in trans for x in ['rotar', 'redimensionar', 'reflejar', 'recortar']):
                 geometricas.append(trans)
@@ -128,14 +128,14 @@ class GestorNodos:
             try:
                 if 'escala_grises' in trans:
                     nodo.escala_grises()
+                    
                 elif 'rotar' in trans:
-                    angle = 45
-                    if '_' in trans:
-                        try:
-                            angle = int(trans.split('_')[-1].replace('°', ''))
-                        except:
-                            pass
+                    try:
+                        angle = int(trans.split('_')[-1])
+                    except:
+                        angle = 45
                     nodo.rotar(angle)
+                    
                 elif 'redimensionar' in trans:
                     if 'x' in trans:
                         try:
@@ -144,20 +144,33 @@ class GestorNodos:
                             nodo.redimensionar(size)
                         except:
                             nodo.redimensionar()
+                    else:
+                        nodo.redimensionar()
+                        
+                elif 'recortar' in trans:
+                    try:
+                        parts = trans.split('_')
+                        if len(parts) >= 5:
+                            box = (int(parts[1]), int(parts[2]), int(parts[3]), int(parts[4]))
+                            nodo.recortar(box)
+                        else:
+                            nodo.recortar()
+                    except:
+                        nodo.recortar()
+                        
                 elif 'reflejar' in trans:
-                    direccion = trans.split('_')[1] if '_' in trans else 'horizontal'
+                    direccion = trans.split('_')[1] if len(trans.split('_')) > 1 else 'horizontal'
                     nodo.reflejar(direccion)
+                    
                 elif 'desenfocar' in trans:
-                    # Extraer valor 0-100 y mapear a radio 0-10
                     try:
                         valor = int(trans.split('_')[-1])
-                        radio = max(0, min(10, valor / 10.0))
+                        radio = max(0.0, min(10.0, valor / 10.0))
                     except:
-                        radio = 2
+                        radio = 2.0
                     nodo.desenfocar(radio)
                     
                 elif 'perfilar' in trans:
-                    # Extraer valor 0-100 y mapear a factor 0.0-3.0
                     try:
                         valor = int(trans.split('_')[-1])
                         factor = max(0.0, min(3.0, valor / 33.33))
@@ -168,39 +181,15 @@ class GestorNodos:
                 elif 'ajustar_brillo' in trans:
                     parts = trans.split('_')
                     try:
-                        # Esperar formato: ajustar_brillo_B_contraste_C (valores 0-100)
                         brillo_val = int(parts[2]) if len(parts) > 2 else 50
                         contraste_val = int(parts[4]) if len(parts) > 4 else 50
-                        # Mapear 0-100 a 0.0-2.0
                         brillo = max(0.0, min(2.0, brillo_val / 50.0))
                         contraste = max(0.0, min(2.0, contraste_val / 50.0))
                     except:
                         brillo = 1.0
                         contraste = 1.0
                     nodo.ajustar_brillo_contraste(brillo, contraste)
-                elif 'insertar_texto' in trans:
-                    # Dividir la cadena: ['insertar', 'texto', 'TextoConPosiblesGuiones', 'X', 'Y']
-                    parts = trans.split('_')
-                    if len(parts) < 3:
-                        texto = "Marca"
-                        posicion = (10, 10)  # Default si no hay más datos
-                    else:
-                        # parts[0] = 'insertar', parts[1] = 'texto'
-                        # El texto es todo lo que quede después hasta encontrar números (X e Y)
-                        # Asumimos que el texto no tiene '_' al final, pero si los tiene, únelos
-                        texto_parts = parts[2:-2] if len(parts) > 4 else parts[2:3]  # Evita tomar X/Y como parte del texto
-                        texto = '_'.join(texto_parts) if texto_parts else "Marca"
-                        
-                        # Extraer X e Y (últimos dos números enteros)
-                        try:
-                            x = int(parts[-2]) if len(parts) > 3 else 10
-                            y = int(parts[-1]) if len(parts) > 3 else 10
-                            posicion = (x, y)
-                        except ValueError:
-                            # Si no se pueden parsear como enteros, usa default
-                            posicion = (10, 10)
                     
-                    nodo.insertar_texto(texto, posicion=posicion)  # Usa el método existente, que ya soporta (x, y)
                 elif 'ajustar_nitidez' in trans:
                     try:
                         nivel = int(trans.split('_')[-1])
@@ -216,9 +205,32 @@ class GestorNodos:
                     except:
                         nivel = 5
                     nodo.ajustar_saturacion(nivel)
-                elif 'convertir_a' in trans:
-                    formato = trans.split('_')[-1].upper()
-                    nodo.convertir_formato(formato)
+                    
+                elif 'insertar_texto' in trans:
+                    parts = trans.split('_')
+                    if len(parts) < 3:
+                        texto = "Marca"
+                        posicion = (10, 10)
+                    else:
+                        # Buscar índices de 'pos' y 'tam'
+                        try:
+                            pos_idx = parts.index('pos')
+                            x = int(parts[pos_idx + 1])
+                            y = int(parts[pos_idx + 2])
+                            posicion = (x, y)
+                            # Texto es todo entre 'texto' y 'pos'
+                            texto = '_'.join(parts[2:pos_idx])
+                        except:
+                            texto = '_'.join(parts[2:-2]) if len(parts) > 4 else parts[2]
+                            try:
+                                x = int(parts[-2])
+                                y = int(parts[-1])
+                                posicion = (x, y)
+                            except:
+                                posicion = (10, 10)
+                    
+                    nodo.insertar_texto(texto, posicion=posicion)
+                    
             except Exception:
                 pass
     

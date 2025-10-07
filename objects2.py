@@ -5,7 +5,7 @@ import os
 import xml.etree.ElementTree as ET
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 import datetime
-from PIL import ImageFont  # Añadir esta línea
+from PIL import ImageFont
 
 class LectorXML:
     """Clase para leer y mostrar contenido de archivos XML generados por la clase Nodo."""
@@ -167,7 +167,7 @@ class NodoOptimizado:
         if self._puede_aplicar_transformacion():
             self.imagen_procesada = self.imagen_procesada.rotate(angle, expand=True, fillcolor='white')
             self._modo_rgb_cache = None
-            self._registrar_transformacion(f"rotar_{angle}°")
+            self._registrar_transformacion(f"rotar_{angle}")
         return self
     
     def reflejar(self, direccion='horizontal'):
@@ -185,14 +185,14 @@ class NodoOptimizado:
     def desenfocar(self, radio=2):
         if self._puede_aplicar_transformacion():
             self.imagen_procesada = self.imagen_procesada.filter(ImageFilter.GaussianBlur(radio))
-            self._registrar_transformacion(f"desenfocar_radio_{radio}")
+            self._registrar_transformacion(f"desenfocar_{int(radio * 10)}")
         return self
     
     def perfilar(self, factor=2.0):
         if self._puede_aplicar_transformacion():
             enhancer = ImageEnhance.Sharpness(self.imagen_procesada)
             self.imagen_procesada = enhancer.enhance(factor)
-            self._registrar_transformacion(f"perfilar_factor_{factor}")
+            self._registrar_transformacion(f"perfilar_{int(factor * 33.33)}")
         return self
     
     def ajustar_brillo_contraste(self, brillo=1.0, contraste=1.0):
@@ -201,12 +201,12 @@ class NodoOptimizado:
             self.imagen_procesada = enhancer_brillo.enhance(brillo)
             enhancer_contraste = ImageEnhance.Contrast(self.imagen_procesada)
             self.imagen_procesada = enhancer_contraste.enhance(contraste)
-            self._registrar_transformacion(f"ajustar_brillo_{brillo}_contraste_{contraste}")
+            self._registrar_transformacion(f"ajustar_brillo_{int(brillo * 50)}_contraste_{int(contraste * 50)}")
         return self
+    
     def ajustar_nitidez(self, nivel=5):
         """Ajusta nitidez. nivel: 0-10 (0=muy borroso, 5=normal, 10=muy nítido)"""
         if self._puede_aplicar_transformacion():
-            # Mapear 0-10 a factor 0.0-2.0
             factor = nivel / 5.0
             enhancer = ImageEnhance.Sharpness(self.imagen_procesada)
             self.imagen_procesada = enhancer.enhance(factor)
@@ -216,32 +216,25 @@ class NodoOptimizado:
     def ajustar_saturacion(self, nivel=5):
         """Ajusta saturación. nivel: 0-10 (0=grises, 5=normal, 10=muy saturado)"""
         if self._puede_aplicar_transformacion():
-            # Mapear 0-10 a factor 0.0-2.0
             factor = nivel / 5.0
             enhancer = ImageEnhance.Color(self.imagen_procesada)
             self.imagen_procesada = enhancer.enhance(factor)
             self._registrar_transformacion(f"ajustar_saturacion_{nivel}")
         return self
+    
     def insertar_texto(self, texto="Marca de agua", posicion=(10, 10), color=(255, 255, 255), tamaño_fuente=None):
         if self._puede_aplicar_transformacion():
             draw = ImageDraw.Draw(self.imagen_procesada)
             
-            # Calcular tamaño de fuente dinámicamente si no se proporciona
             if tamaño_fuente is None:
                 ancho, alto = self.imagen_procesada.size
-                tamaño_fuente = max(100, int(0.08 * min(ancho, alto)))  # 20% de la menor dimensión, mínimo 12px
+                tamaño_fuente = max(20, int(0.08 * min(ancho, alto)))
             
-            # Cargar fuente con el tamaño calculado o proporcionado (intenta Arial; fallback a default)
             try:
-                # Busca una fuente común en el sistema (Arial, o usa 'arial.ttf' si lo tienes)
-                # Cambia por ruta si es necesario, ej: "/path/to/arial.ttf" o r"C:\Windows\Fonts\arial.ttf"
                 fuente = ImageFont.truetype("arial.ttf", tamaño_fuente)
             except IOError:
-                # Fallback a fuente predeterminada de Pillow (tamaño fijo ~10, pero portable)
                 fuente = ImageFont.load_default()
-                # Nota: load_default() ignora tamaño_fuente, pero es un fallback seguro
             
-            # Ajustar color según modo de imagen (igual que antes)
             if self.imagen_procesada.mode == "L":
                 if isinstance(color, tuple):
                     if len(color) >= 3:
@@ -257,7 +250,6 @@ class NodoOptimizado:
             else:
                 draw.text(posicion, texto, fill=color, font=fuente)
             
-            # Registrar con el tamaño usado (calculado o explícito)
             self._registrar_transformacion(f"insertar_texto_{texto}_pos_{posicion[0]}_{posicion[1]}_tam_{tamaño_fuente}")
         return self
     
@@ -270,7 +262,6 @@ class NodoOptimizado:
     def convertir_y_comprimir_optimizado(self, formato="JPEG", calidad=85, nivel_compresion=6):
         buffer = io.BytesIO()
         
-        # Normalizar formato
         formato_upper = formato.upper()
         if formato_upper == "JPG":
             formato_upper = "JPEG"
