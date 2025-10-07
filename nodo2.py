@@ -159,8 +159,28 @@ class GestorNodos:
                     contraste = float(parts[4]) if len(parts) > 4 else 1.0
                     nodo.ajustar_brillo_contraste(brillo, contraste)
                 elif 'insertar_texto' in trans:
-                    texto = trans.split('_', 2)[2] if '_' in trans else "Marca"
-                    nodo.insertar_texto(texto)
+                    # Dividir la cadena: ['insertar', 'texto', 'TextoConPosiblesGuiones', 'X', 'Y']
+                    parts = trans.split('_')
+                    if len(parts) < 3:
+                        texto = "Marca"
+                        posicion = (10, 10)  # Default si no hay más datos
+                    else:
+                        # parts[0] = 'insertar', parts[1] = 'texto'
+                        # El texto es todo lo que quede después hasta encontrar números (X e Y)
+                        # Asumimos que el texto no tiene '_' al final, pero si los tiene, únelos
+                        texto_parts = parts[2:-2] if len(parts) > 4 else parts[2:3]  # Evita tomar X/Y como parte del texto
+                        texto = '_'.join(texto_parts) if texto_parts else "Marca"
+                        
+                        # Extraer X e Y (últimos dos números enteros)
+                        try:
+                            x = int(parts[-2]) if len(parts) > 3 else 10
+                            y = int(parts[-1]) if len(parts) > 3 else 10
+                            posicion = (x, y)
+                        except ValueError:
+                            # Si no se pueden parsear como enteros, usa default
+                            posicion = (10, 10)
+                    
+                    nodo.insertar_texto(texto, posicion=posicion)  # Usa el método existente, que ya soporta (x, y)
                 elif 'convertir_a' in trans:
                     formato = trans.split('_')[-1].upper()
                     nodo.convertir_formato(formato)
