@@ -136,15 +136,19 @@ class GestorNodos:
                     nodo.rotar(angle)
                     
                 elif 'redimensionar' in trans:
+                    if 'sin_cambio' in trans:
+                        continue
                     if 'x' in trans:
                         try:
                             dims = trans.split('_')[1].split('x')
                             size = (int(dims[0]), int(dims[1]))
-                            nodo.redimensionar(size)
+                            if size != nodo.imagen_procesada.size:
+                                nodo.redimensionar(size)
                         except:
-                            nodo.redimensionar()
+                            pass
                     else:
-                        nodo.redimensionar()
+                        if (200, 200) != nodo.imagen_procesada.size:
+                            nodo.redimensionar()
                         
                 elif 'recortar' in trans:
                     try:

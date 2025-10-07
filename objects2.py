@@ -151,9 +151,12 @@ class NodoOptimizado:
     
     def redimensionar(self, size=(200, 200)):
         if self._puede_aplicar_transformacion():
-            self.imagen_procesada = self.imagen_procesada.resize(size, Image.Resampling.BILINEAR)
-            self._modo_rgb_cache = None
-            self._registrar_transformacion(f"redimensionar_{size[0]}x{size[1]}")
+            if size != self.imagen_procesada.size:
+                self.imagen_procesada = self.imagen_procesada.resize(size, Image.Resampling.BILINEAR)
+                self._modo_rgb_cache = None
+                self._registrar_transformacion(f"redimensionar_{size[0]}x{size[1]}")
+            else:
+                self._registrar_transformacion("redimensionar_sin_cambio")
         return self
     
     def recortar(self, box=(0, 0, 100, 100)):
