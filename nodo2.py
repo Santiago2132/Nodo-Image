@@ -108,6 +108,11 @@ class GestorNodos:
     def _aplicar_transformaciones_optimizado(self, nodo, transformaciones_str):
         trans_list = transformaciones_str.split(', ')
         
+        # IMPRIME TRANSFORMACIONES A APLICAR
+        print(f"\n🔧 Procesando transformaciones: {transformaciones_str}")
+        print(f"   Total a aplicar: {len(trans_list)}")
+        for idx, t in enumerate(trans_list, 1):
+            print(f"   [{idx}] {t}")
         ajustes_color = []
         geometricas = []
         efectos = []
